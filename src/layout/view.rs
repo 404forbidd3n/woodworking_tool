@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::model::{
+use crate::layout::model::{
     example_layout, read_project, resolve_layout_path, Editor, Finish, FinishPreset, Furniture,
     PieceFile, ReadError, Room, RoomFile, RoomRoot, Solid, Surface,
 };
@@ -171,6 +171,7 @@ pub fn setup_world(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut room: ResMut<Room>,
     mut editor: ResMut<Editor>,
+    mut cut_job: ResMut<crate::cutting::CutJob>,
 ) {
     ambient.color = Color::srgb(1.0, 0.98, 0.94);
     ambient.brightness = 90.0;
@@ -211,6 +212,7 @@ pub fn setup_world(
             editor.snap_enabled = file.snap_enabled;
             editor.snap_mm = file.snap_mm;
             editor.status = "Loaded".into();
+            *cut_job = crate::cutting::CutJob::from_file(&file.cut_list);
             Some(file.pieces)
         }
         Err(ReadError::Missing) => {
@@ -255,7 +257,7 @@ fn placement_from_file(piece: PieceFile) -> (Furniture, Transform) {
     furniture.ensure_front_finishes();
     (
         furniture,
-        crate::model::place(piece.x_mm, piece.y_mm, piece.z_mm, piece.turns),
+        crate::layout::model::place(piece.x_mm, piece.y_mm, piece.z_mm, piece.turns),
     )
 }
 
@@ -305,7 +307,7 @@ pub fn sync_meshes(
     }
 
     for (entity, furniture) in pending {
-        let parts = crate::model::solids(&furniture);
+        let parts = crate::layout::model::solids(&furniture);
         commands
             .entity(entity)
             .insert(Name::new(furniture.kind.label()));
@@ -434,7 +436,7 @@ fn surface_material(
 pub fn draw_guides(
     mut gizmos: Gizmos,
     room: Res<Room>,
-    selection: Res<crate::model::Selection>,
+    selection: Res<crate::layout::model::Selection>,
     pieces: Query<(&Furniture, &GlobalTransform)>,
 ) {
     draw_grid(&mut gizmos, &room);
@@ -444,7 +446,7 @@ pub fn draw_guides(
         let Ok((furniture, transform)) = pieces.get(*selected) else {
             continue;
         };
-        let (min, max) = crate::model::pick_bounds(furniture);
+        let (min, max) = crate::layout::model::pick_bounds(furniture);
         let color = if selection.primary == Some(*selected) {
             Color::srgb(0.95, 0.42, 0.08)
         } else {
@@ -554,10 +556,10 @@ pub fn piece_file(furniture: &Furniture, transform: &Transform) -> PieceFile {
         width_mm: furniture.width_mm,
         height_mm: furniture.height_mm,
         depth_mm: furniture.depth_mm,
-        x_mm: crate::model::m_to_mm(transform.translation.x),
-        y_mm: crate::model::m_to_mm(transform.translation.y),
-        z_mm: crate::model::m_to_mm(transform.translation.z),
-        turns: crate::model::quarter_turns(transform.rotation),
+        x_mm: crate::layout::model::m_to_mm(transform.translation.x),
+        y_mm: crate::layout::model::m_to_mm(transform.translation.y),
+        z_mm: crate::layout::model::m_to_mm(transform.translation.z),
+        turns: crate::layout::model::quarter_turns(transform.rotation),
         finishes: furniture.finishes.clone(),
     }
 }

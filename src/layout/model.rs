@@ -872,6 +872,55 @@ pub struct ProjectFile {
     pub snap_mm: f32,
     pub room: RoomFile,
     pub pieces: Vec<PieceFile>,
+    /// The cut planner. Missing in older files, which then start from a
+    /// standard 2440 × 1220 mm sheet.
+    #[serde(default)]
+    pub cut_list: CutListFile,
+}
+
+/// Saved sheet and parts. The planner that edits this lives in `cutting`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CutListFile {
+    pub board_width_mm: f32,
+    pub board_height_mm: f32,
+    pub thickness_mm: f32,
+    pub kerf_mm: f32,
+    pub trim_mm: f32,
+    pub allow_rotate: bool,
+    pub draft_role: String,
+    pub draft_name: String,
+    pub draft_width_mm: f32,
+    pub draft_height_mm: f32,
+    pub draft_quantity: u32,
+    pub parts: Vec<CutPartFile>,
+}
+
+impl Default for CutListFile {
+    fn default() -> Self {
+        Self {
+            board_width_mm: 2440.0,
+            board_height_mm: 1220.0,
+            thickness_mm: 18.0,
+            kerf_mm: 3.0,
+            trim_mm: 0.0,
+            allow_rotate: true,
+            draft_role: "Door".into(),
+            draft_name: String::new(),
+            draft_width_mm: 600.0,
+            draft_height_mm: 720.0,
+            draft_quantity: 1,
+            parts: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CutPartFile {
+    pub name: String,
+    pub role: String,
+    pub width_mm: f32,
+    pub height_mm: f32,
+    pub quantity: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -995,6 +1044,20 @@ impl ProjectFile {
                 .fronts
                 .resize(piece.kind.front_count(), Finish::default());
             piece.finishes.fronts.truncate(piece.kind.front_count());
+        }
+        let list = &mut self.cut_list;
+        list.board_width_mm = finite_or(list.board_width_mm, 2440.0).clamp(100.0, 4000.0);
+        list.board_height_mm = finite_or(list.board_height_mm, 1220.0).clamp(100.0, 4000.0);
+        list.thickness_mm = finite_or(list.thickness_mm, 18.0).clamp(3.0, 60.0);
+        list.kerf_mm = finite_or(list.kerf_mm, 3.0).clamp(0.0, 10.0);
+        list.trim_mm = finite_or(list.trim_mm, 0.0).clamp(0.0, 50.0);
+        list.draft_width_mm = finite_or(list.draft_width_mm, 600.0).clamp(10.0, 4000.0);
+        list.draft_height_mm = finite_or(list.draft_height_mm, 720.0).clamp(10.0, 4000.0);
+        list.draft_quantity = list.draft_quantity.clamp(1, 100);
+        for part in &mut list.parts {
+            part.width_mm = finite_or(part.width_mm, 100.0).clamp(1.0, 4000.0);
+            part.height_mm = finite_or(part.height_mm, 100.0).clamp(1.0, 4000.0);
+            part.quantity = part.quantity.clamp(1, 100);
         }
         self
     }
@@ -1128,6 +1191,8 @@ mod tests {
         assert_eq!(file.version, 1);
         assert_eq!(file.pieces[0].name, "Drawer Base Cabinet");
         assert_eq!(file.pieces[0].finishes.fronts.len(), 3);
+        assert_eq!(file.cut_list.board_width_mm, 2440.0);
+        assert!(file.cut_list.parts.is_empty());
     }
 
     #[test]

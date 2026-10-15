@@ -1,29 +1,28 @@
-//! A small 3D layout tool for kitchens and other rooms.
+//! A small 3D layout tool for kitchens and other rooms, plus a sheet cutter.
 //!
-//! Run it with `cargo run`. The toolbar shows the open file. The sidebar
-//! holds room size, the six piece types, and millimeters for the selection.
-//! Flatma-style cut lists, materials, and drilling plans are intentionally
-//! not here.
+//! Run it with `cargo run`. The toolbar shows the open file and opens the
+//! cut planner. The sidebar holds the room, the furniture, and the selection.
 //!
-//! The code is split so each file has one job:
+//! Where the code lives:
 //!
-//! - `model` — millimeters, cabinet types, and how a cabinet is broken into boxes
-//! - `view` — camera, room shell, meshes, grid
-//! - `edit` — mouse, keyboard, sidebar, saving `layout.json`
+//! - `layout` — the 3D room: data, drawing, and the sidebar
+//! - `cutting` — the separate window that nests parts on plywood
+//! - `theme` — the shared colors, buttons, and section headers
 
-mod edit;
-mod model;
-mod view;
+mod cutting;
+mod layout;
+mod theme;
 
 use bevy::prelude::*;
 use bevy::winit::WinitSettings;
 use bevy_egui::EguiPlugin;
 
-use crate::edit::{
+use crate::cutting::{on_window_closed, CutJob, CutPlannerPass, CutWindow};
+use crate::layout::edit::{
     orbit_camera, pointer, shortcuts, sidebar, PropertiesUi, SidebarWidth, ToolbarHeight,
 };
-use crate::model::{Editor, Room, Selection};
-use crate::view::{draw_guides, setup_world, sync_meshes};
+use crate::layout::model::{Editor, Room, Selection};
+use crate::layout::view::{draw_guides, setup_world, sync_meshes};
 
 fn main() {
     App::new()
@@ -33,10 +32,12 @@ fn main() {
         .insert_resource(Room::default())
         .insert_resource(Editor::default())
         .insert_resource(Selection::default())
-        .insert_resource(edit::Drag::default())
+        .insert_resource(layout::edit::Drag::default())
         .insert_resource(PropertiesUi::default())
         .insert_resource(SidebarWidth::default())
         .insert_resource(ToolbarHeight::default())
+        .insert_resource(CutJob::default())
+        .insert_resource(CutWindow::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Woodworking layout".into(),
@@ -48,8 +49,12 @@ fn main() {
         .add_systems(Startup, setup_world)
         // Pointer runs first so a click and a camera move in the same frame
         // agree about what is selected. The camera transform is written last.
-        .add_systems(Update, (pointer, shortcuts, orbit_camera).chain())
+        .add_systems(
+            Update,
+            (pointer, shortcuts, orbit_camera, on_window_closed).chain(),
+        )
         .add_systems(bevy_egui::EguiPrimaryContextPass, sidebar)
+        .add_systems(CutPlannerPass, cutting::ui_draw)
         // New boxes have to exist before transforms propagate, or a resized
         // cabinet would lag a frame behind its outline.
         .add_systems(PostUpdate, sync_meshes.before(TransformSystems::Propagate))

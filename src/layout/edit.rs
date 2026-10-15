@@ -11,13 +11,16 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 
-use crate::model::{
+use crate::cutting::{self, CutJob, CutWindow};
+use crate::theme::{self, dropdown, toolbar_frame};
+
+use crate::layout::model::{
     example_layout, m_to_mm, mm_to_m, pick_bounds, place, quarter_turns, ray_aabb,
     ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns, snap_to_step,
     write_project, Editor, Finish, FinishPreset, Furniture, Kind, ProjectFile, ReadError, Room,
     Selection,
 };
-use crate::view::{self, OrbitCamera};
+use crate::layout::view::{self, OrbitCamera};
 
 /// Width of the sidebar in logical pixels. The 3D view ignores the pointer
 /// only while it is actually inside this strip, so orbit and zoom keep working
@@ -436,16 +439,19 @@ pub fn sidebar(
     mut camera: Query<&mut OrbitCamera>,
     mut sidebar_width: ResMut<SidebarWidth>,
     mut toolbar_height: ResMut<ToolbarHeight>,
+    mut cut_job: ResMut<CutJob>,
+    mut cut_window: ResMut<CutWindow>,
+    cut_windows: Query<Entity, With<cutting::CutPlannerWindow>>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
-    apply_theme(ctx);
+    theme::apply_theme(ctx);
     // Cmd+S is read here so it still saves when Project is collapsed.
     let save_shortcut =
         ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::S));
     if save_shortcut {
-        save_layout(&mut editor, &room, &pieces);
+        save_layout(&mut editor, &room, &pieces, &cut_job);
     }
 
     // egui 0.36 draws panels into a root Ui instead of straight onto the context.
@@ -468,6 +474,9 @@ pub fn sidebar(
                 &mut selection,
                 &mut camera,
                 &pieces,
+                &mut cut_job,
+                &mut cut_window,
+                &cut_windows,
             );
         });
     toolbar_height.0 = toolbar.response.rect.height();
@@ -475,7 +484,7 @@ pub fn sidebar(
     let panel = egui::Panel::left("tools")
         .resizable(true)
         .default_size(300.0)
-        .frame(sidebar_frame())
+        .frame(theme::sidebar_frame())
         .show(&mut viewport_ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 dropdown(ui, "Project", false, |ui| {
@@ -487,6 +496,7 @@ pub fn sidebar(
                         &mut selection,
                         &mut camera,
                         &pieces,
+                        &mut cut_job,
                     );
                 });
 
@@ -672,6 +682,7 @@ pub fn sidebar(
                         "Right-click a piece and choose Properties to edit it in the side panel.",
                     );
                     ui.weak("Right-drag still pans.");
+                    ui.weak("Cut planner opens the sheet layout in its own window.");
                 });
             });
         });
@@ -681,7 +692,7 @@ pub fn sidebar(
         let docked = egui::Panel::left("properties")
             .resizable(true)
             .default_size(340.0)
-            .frame(sidebar_frame())
+            .frame(theme::sidebar_frame())
             .show(&mut viewport_ui, |ui| {
                 draw_properties_panel(
                     ui,
@@ -697,86 +708,6 @@ pub fn sidebar(
     draw_context_menu(ctx, &mut properties);
 }
 
-fn ink() -> egui::Color32 {
-    egui::Color32::from_rgb(62, 48, 38)
-}
-
-fn paper() -> egui::Color32 {
-    egui::Color32::from_rgb(246, 241, 232)
-}
-
-fn chip() -> egui::Color32 {
-    egui::Color32::from_rgb(232, 220, 202)
-}
-
-fn line() -> egui::Color32 {
-    egui::Color32::from_rgb(196, 176, 150)
-}
-
-fn copper() -> egui::Color32 {
-    egui::Color32::from_rgb(158, 90, 42)
-}
-
-fn apply_theme(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::light();
-    visuals.panel_fill = paper();
-    visuals.window_fill = paper();
-    visuals.extreme_bg_color = egui::Color32::from_rgb(255, 252, 247);
-    visuals.faint_bg_color = chip();
-    visuals.code_bg_color = chip();
-    visuals.collapsing_header_frame = true;
-    visuals.indent_has_left_vline = false;
-    visuals.slider_trailing_fill = true;
-    visuals.selection.bg_fill = egui::Color32::from_rgb(214, 176, 132);
-    visuals.selection.stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, line());
-    visuals.widgets.noninteractive.weak_bg_fill = paper();
-    visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(255, 250, 244);
-    visuals.widgets.inactive.bg_fill = chip();
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, line());
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(255, 244, 230);
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(236, 210, 176);
-    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, copper());
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.active.weak_bg_fill = egui::Color32::from_rgb(232, 196, 154);
-    visuals.widgets.active.bg_fill = copper();
-    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, copper());
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.open.weak_bg_fill = chip();
-    visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.open.corner_radius = egui::CornerRadius::same(6);
-    // Both themes, so a system dark-mode setting does not put light text on this paper.
-    ctx.set_visuals_of(egui::Theme::Light, visuals.clone());
-    ctx.set_visuals_of(egui::Theme::Dark, visuals);
-    ctx.set_theme(egui::Theme::Light);
-
-    ctx.all_styles_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-        style.spacing.button_padding = egui::vec2(10.0, 5.0);
-        style.spacing.interact_size.y = 28.0;
-        style.spacing.indent = 16.0;
-    });
-}
-
-fn toolbar_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(74, 56, 42))
-        .inner_margin(egui::Margin::symmetric(14, 8))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 36, 28)))
-}
-
-fn sidebar_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(paper())
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .stroke(egui::Stroke::new(1.0, line()))
-}
-
 fn draw_toolbar(
     ui: &mut egui::Ui,
     commands: &mut Commands,
@@ -785,6 +716,9 @@ fn draw_toolbar(
     selection: &mut Selection,
     camera: &mut Query<&mut OrbitCamera>,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
+    cut_job: &mut CutJob,
+    cut_window: &mut CutWindow,
+    cut_windows: &Query<Entity, With<cutting::CutPlannerWindow>>,
 ) {
     let cream = egui::Color32::from_rgb(246, 236, 220);
     let muted = egui::Color32::from_rgb(214, 196, 170);
@@ -810,10 +744,13 @@ fn draw_toolbar(
             });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Load").clicked() {
-                load_layout(commands, pieces, room, editor, selection, camera);
+                load_layout(commands, pieces, room, editor, selection, camera, cut_job);
             }
             if ui.button("Save").clicked() {
-                save_layout(editor, room, pieces);
+                save_layout(editor, room, pieces, cut_job);
+            }
+            if ui.button("Cut planner").clicked() {
+                cutting::open_window(commands, cut_window, cut_windows);
             }
             if !editor.status.is_empty() {
                 let color = if error {
@@ -832,26 +769,9 @@ fn draw_toolbar(
 fn layout_label(path: &str) -> String {
     let resolved = resolve_layout_path(path);
     resolved
-        .strip_prefix(crate::model::project_dir())
+        .strip_prefix(crate::layout::model::project_dir())
         .map(|relative| relative.display().to_string())
         .unwrap_or_else(|_| resolved.display().to_string())
-}
-
-/// A sidebar section that opens and closes. `open` is only the first-run state.
-fn dropdown(ui: &mut egui::Ui, title: &str, open: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
-    ui.add_space(6.0);
-    egui::CollapsingHeader::new(
-        egui::RichText::new(title)
-            .strong()
-            .size(15.0)
-            .color(egui::Color32::BLACK),
-    )
-    .default_open(open)
-    .show_background(true)
-    .show(ui, |ui| {
-        ui.add_space(2.0);
-        add_contents(ui);
-    });
 }
 
 fn library_button(ui: &mut egui::Ui, label: &str, kind: Kind) -> egui::Response {
@@ -1335,15 +1255,16 @@ fn draw_project(
     selection: &mut Selection,
     camera: &mut Query<&mut OrbitCamera>,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
+    cut_job: &mut CutJob,
 ) {
     ui.weak("File in the project folder");
     ui.add(egui::TextEdit::singleline(&mut editor.path).desired_width(f32::INFINITY));
     ui.horizontal(|ui| {
         if ui.button("Save").clicked() {
-            save_layout(editor, room, pieces);
+            save_layout(editor, room, pieces, cut_job);
         }
         if ui.button("Load").clicked() {
-            load_layout(commands, pieces, room, editor, selection, camera);
+            load_layout(commands, pieces, room, editor, selection, camera, cut_job);
         }
     });
     ui.weak("Cmd+S also saves.");
@@ -1353,12 +1274,20 @@ fn save_layout(
     editor: &mut Editor,
     room: &Room,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
+    cut_job: &CutJob,
 ) {
     if editor.path.trim().is_empty() {
         editor.path = "layout.json".into();
     }
     let path = resolve_layout_path(&editor.path);
-    editor.status = match write_current(&path, editor.snap_enabled, editor.snap_mm, room, pieces) {
+    editor.status = match write_current(
+        &path,
+        editor.snap_enabled,
+        editor.snap_mm,
+        room,
+        pieces,
+        cut_job,
+    ) {
         Ok(()) => "Saved".into(),
         Err(message) => message,
     };
@@ -1371,6 +1300,7 @@ fn write_current(
     snap_mm: f32,
     room: &Room,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
+    cut_job: &CutJob,
 ) -> Result<(), String> {
     let file = ProjectFile {
         version: 2,
@@ -1381,6 +1311,7 @@ fn write_current(
             .iter()
             .map(|(_, furniture, transform)| view::piece_file(furniture, &transform))
             .collect(),
+        cut_list: cut_job.to_file(),
     };
     write_project(path, &file)
 }
@@ -1454,6 +1385,7 @@ fn load_layout(
     editor: &mut Editor,
     selection: &mut Selection,
     camera: &mut Query<&mut OrbitCamera>,
+    cut_job: &mut CutJob,
 ) {
     if editor.path.trim().is_empty() {
         editor.path = "layout.json".into();
@@ -1473,6 +1405,7 @@ fn load_layout(
             room.dirty = true;
             editor.snap_enabled = file.snap_enabled;
             editor.snap_mm = file.snap_mm;
+            *cut_job = CutJob::from_file(&file.cut_list);
             for piece in file.pieces {
                 let mut furniture =
                     Furniture::new(piece.kind, piece.width_mm, piece.height_mm, piece.depth_mm);

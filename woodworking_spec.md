@@ -36,3 +36,19 @@ Stage 2:
 - scrool speed should be tuned down a bit, i think the scroll speed is a bit high right now
 
 - menu in the left looks a bit better, but some text seems a bit shaded, i want the text for each Dropdown to be bald, the font size a bit bigger and the collor black, so i can properly see each tab
+
+
+Stage 3
+
+I want to add a separate button which opens a completly new window which will have a 2D canvas, i want this functionality to sit in a separate subfolder or area of the project, and i also want it to be well documented in the code with comments, i will describe bellow what i will want here :
+
+
+- in this window i would like to add the dimensions for a raw board of plywood or wood -> this should be the total dimensions of the supplyed wood -> from there i want to add the number of doors and shelves and tops and bottoms and other parts which i want to cut
+
+- the program should show me all the cuts i want to make on the 2d canvas, which will show the full board, and where should i cut to waste as little material as possible
+
+- the canvas should clearly show the width and hight with big bold numbers, and the areas where the cuts will happen should be highlited with different collors
+
+- i want to have a list in the left panel to basically add the number and the dimensions of the sub-boards i want to cut
+
+- in the end after i hit another button, lets say "estimate" i want to see how many board i need to order for all the components i am trying to cut
