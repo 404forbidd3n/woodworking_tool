@@ -52,3 +52,40 @@ I want to add a separate button which opens a completly new window which will ha
 - i want to have a list in the left panel to basically add the number and the dimensions of the sub-boards i want to cut
 
 - in the end after i hit another button, lets say "estimate" i want to see how many board i need to order for all the components i am trying to cut
+
+
+
+
+Stage 4:
+
+1. I want to split all the furniture types in 2 sub categories following this structure:
+
+        Floor : 
+                - Cabinet with drawer or drawers (specify number of drawers and arange them equily inside the cabinet based on the hight)
+                - A drawer with one or two door
+                - A cabiner or drawer with sliding doors
+                - A simple table with 4 legs
+                - A custom cabiner/drawer - > the initial placeholder type should be change in a cabinet with only shelves with no door, the number of shelves should be editable as the number of drawers for the drawer
+
+        Wall mounted :
+                - A drawer with one or two door
+                - A drawer with a door which opens upside down
+                - A drawerbinet -> this is basically a cabinet with drawers instead of normal doors
+
+The floor items should have an option for plastic legs, or metal legs, those legs are usually with screws which makes the cabinet adjustable in hight, i want all the drawers and cabbinets to have legs of this type attached by default, i should be able to remove them manually afterwards (maybe like a select box for legs, metal 100mm, metal 150mm plastic, wood, none, etc -> fill in some of them for me)
+
+All the mounted ones should have a lower depth by default, 350mm should be enough
+
+
+2. the ability to UNDO, somethins i drag something by mystake and i cannot undo, i just want a very basic for of UNDO/DO -> not to many items in the history, lets say 5-10 UNDO's should be enough
+
+3. Fix the UI for the properties area, some text is still not visible, with black and bold text to the dropdown buttons, simillar with the initial menu
+
+4. The ability to save and load specific .json configs, i want to have multiple projects, saved as JSON files, so i need to name files, open specific files, load, save, etc . Make the menu bar with a LOAD select file, and a save -> with file name . something like that.
+
+5. I want the width measurement of each cabinet and drawer to be written in bald blac text with arros pointing to its with left to right underneath each of them, the text does not need to be too large so it will not interfere to much in the visual space.
+
+6. I want to add a few basic edits to the room itself, like adding a door place , a window place, and its positions basically, leave the room a bit editable for this
+
+
+        

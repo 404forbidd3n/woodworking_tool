@@ -66,9 +66,12 @@ pub enum Kind {
     Countertop,
     /// A lighter standalone top for a custom table base.
     Tabletop,
-    /// An empty box used as a stand-in for a sink, appliance, or anything
-    /// the other types do not cover.
-    Box,
+    /// An open-front cabinet with editable internal shelves.
+    #[serde(alias = "box")]
+    OpenShelves {
+        #[serde(default = "default_shelf_count")]
+        shelves: u8,
+    },
     Refrigerator,
     Dishwasher,
     ElectricOven,
@@ -78,8 +81,17 @@ pub enum Kind {
 
 impl Kind {
     pub fn label(self) -> &'static str {
+        self.label_for(Placement::Floor)
+    }
+
+    pub fn label_for(self, placement: Placement) -> &'static str {
         match self {
+            Kind::Drawers { .. } if placement == Placement::Wall => "Wall Drawer Cabinet",
             Kind::Drawers { .. } => "Drawer Base Cabinet",
+            Kind::HingedDoors { doors: 1 } if placement == Placement::Wall => {
+                "Single-Door Wall Cabinet"
+            }
+            Kind::HingedDoors { .. } if placement == Placement::Wall => "Double-Door Wall Cabinet",
             Kind::HingedDoors { doors: 1 } => "Single-Door Base Cabinet",
             Kind::HingedDoors { .. } => "Double-Door Base Cabinet",
             Kind::LiftDoor => "Wall Lift-Up Cabinet",
@@ -87,7 +99,7 @@ impl Kind {
             Kind::Table => "Work Table",
             Kind::Countertop => "Kitchen Worktop",
             Kind::Tabletop => "Tabletop",
-            Kind::Box => "Custom Block",
+            Kind::OpenShelves { .. } => "Open Shelf Cabinet",
             Kind::Refrigerator => "Refrigerator",
             Kind::Dishwasher => "Dishwasher",
             Kind::ElectricOven => "Electric Oven",
@@ -120,29 +132,100 @@ impl Kind {
     pub fn is_cabinet(self) -> bool {
         matches!(
             self,
-            Kind::Drawers { .. } | Kind::HingedDoors { .. } | Kind::LiftDoor | Kind::SlidingDoors
+            Kind::Drawers { .. }
+                | Kind::HingedDoors { .. }
+                | Kind::LiftDoor
+                | Kind::SlidingDoors
+                | Kind::OpenShelves { .. }
         )
     }
 
     /// Sizes a woodworker would actually start from, plus how high the base
     /// of the piece sits. Wall cabinets start above a 720 mm base.
-    pub fn preset(self) -> (Furniture, f32) {
+    pub fn preset(self, placement: Placement) -> (Furniture, f32) {
         let (width, height, depth, y_mm) = match self {
-            Kind::Drawers { .. } => (600.0, 720.0, 560.0, 0.0),
-            Kind::HingedDoors { .. } => (600.0, 720.0, 560.0, 0.0),
+            Kind::Drawers { .. } | Kind::HingedDoors { .. } => {
+                if placement == Placement::Wall {
+                    (600.0, 720.0, 350.0, 1400.0)
+                } else {
+                    (600.0, 720.0, 560.0, 0.0)
+                }
+            }
             Kind::LiftDoor => (600.0, 400.0, 350.0, 1400.0),
             Kind::SlidingDoors => (1000.0, 2100.0, 600.0, 0.0),
             Kind::Table => (1400.0, 750.0, 800.0, 0.0),
             Kind::Countertop => (2400.0, 38.0, 635.0, 720.0),
             Kind::Tabletop => (1400.0, 30.0, 800.0, 720.0),
-            Kind::Box => (600.0, 720.0, 560.0, 0.0),
+            Kind::OpenShelves { .. } => (600.0, 720.0, 560.0, 0.0),
             Kind::Refrigerator => (900.0, 1850.0, 700.0, 0.0),
             Kind::Dishwasher => (600.0, 820.0, 600.0, 0.0),
             Kind::ElectricOven => (600.0, 600.0, 570.0, 720.0),
             Kind::CoffeeMachine => (260.0, 350.0, 420.0, 900.0),
             Kind::Microwave => (520.0, 310.0, 400.0, 1200.0),
         };
-        (Furniture::new(self, width, height, depth), y_mm)
+        let mut furniture = Furniture::new(self, width, height, depth);
+        furniture.placement = placement;
+        furniture.name = self.label_for(placement).to_owned();
+        furniture.legs = if placement == Placement::Floor && self.is_cabinet() {
+            LegStyle::Plastic100
+        } else {
+            LegStyle::None
+        };
+        (furniture, y_mm)
+    }
+}
+
+const fn default_shelf_count() -> u8 {
+    3
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    #[default]
+    Floor,
+    Wall,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LegStyle {
+    #[default]
+    None,
+    Plastic100,
+    Plastic150,
+    Metal100,
+    Metal150,
+    Wood100,
+}
+
+impl LegStyle {
+    pub const ALL: [Self; 6] = [
+        Self::None,
+        Self::Plastic100,
+        Self::Plastic150,
+        Self::Metal100,
+        Self::Metal150,
+        Self::Wood100,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Plastic100 => "Plastic · 100 mm",
+            Self::Plastic150 => "Plastic · 150 mm",
+            Self::Metal100 => "Metal · 100 mm",
+            Self::Metal150 => "Metal · 150 mm",
+            Self::Wood100 => "Wood · 100 mm",
+        }
+    }
+
+    pub fn height_mm(self) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Plastic100 | Self::Metal100 | Self::Wood100 => 100.0,
+            Self::Plastic150 | Self::Metal150 => 150.0,
+        }
     }
 }
 
@@ -191,7 +274,7 @@ impl Default for Finish {
 
 /// Editable finishes for every visible family of parts. Carcass order is
 /// left, right, bottom, top, back. Fronts follows the visible front order.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PartFinishes {
     pub carcass: [Finish; 5],
@@ -224,6 +307,8 @@ impl Default for PartFinishes {
 pub struct Furniture {
     pub kind: Kind,
     pub name: String,
+    pub placement: Placement,
+    pub legs: LegStyle,
     pub width_mm: f32,
     pub height_mm: f32,
     pub depth_mm: f32,
@@ -234,9 +319,20 @@ pub struct Furniture {
 
 impl Furniture {
     pub fn new(kind: Kind, width_mm: f32, height_mm: f32, depth_mm: f32) -> Self {
+        let placement = if kind == Kind::LiftDoor {
+            Placement::Wall
+        } else {
+            Placement::Floor
+        };
         let mut furniture = Self {
             kind,
             name: kind.label().to_owned(),
+            placement,
+            legs: if placement == Placement::Floor && kind.is_cabinet() {
+                LegStyle::Plastic100
+            } else {
+                LegStyle::None
+            },
             width_mm,
             height_mm,
             depth_mm,
@@ -260,6 +356,18 @@ impl Furniture {
             mm_to_m(self.depth_mm).max(0.05),
         )
     }
+
+    pub fn leg_height_meters(&self) -> f32 {
+        if self.placement == Placement::Floor && self.kind.is_cabinet() {
+            mm_to_m(self.legs.height_mm())
+        } else {
+            0.0
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        self.kind.label_for(self.placement)
+    }
 }
 
 /// Floor rectangle and the three walls around it. The open side is +Z,
@@ -270,6 +378,7 @@ pub struct Room {
     pub depth_mm: f32,
     pub wall_height_mm: f32,
     pub show_walls: bool,
+    pub openings: Vec<Opening>,
     pub dirty: bool,
 }
 
@@ -280,7 +389,59 @@ impl Default for Room {
             depth_mm: 3000.0,
             wall_height_mm: 2400.0,
             show_walls: true,
+            openings: Vec::new(),
             dirty: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpeningKind {
+    Door,
+    Window,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WallSide {
+    Back,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Opening {
+    pub kind: OpeningKind,
+    pub wall: WallSide,
+    /// Distance from the wall's left/back end.
+    pub offset_mm: f32,
+    pub width_mm: f32,
+    pub height_mm: f32,
+    /// Doors always sanitize this to zero.
+    pub sill_mm: f32,
+}
+
+impl Opening {
+    pub fn door() -> Self {
+        Self {
+            kind: OpeningKind::Door,
+            wall: WallSide::Back,
+            offset_mm: 800.0,
+            width_mm: 900.0,
+            height_mm: 2050.0,
+            sill_mm: 0.0,
+        }
+    }
+
+    pub fn window() -> Self {
+        Self {
+            kind: OpeningKind::Window,
+            wall: WallSide::Back,
+            offset_mm: 1000.0,
+            width_mm: 1200.0,
+            height_mm: 1000.0,
+            sill_mm: 900.0,
         }
     }
 }
@@ -387,6 +548,7 @@ pub enum Surface {
     Handle,
     Top,
     Appliance(u8),
+    Leg(LegStyle),
     Floor,
     Wall,
 }
@@ -417,18 +579,18 @@ impl Solid {
 /// and do not share faces, so the seams do not flicker.
 pub fn solids(furniture: &Furniture) -> Vec<Solid> {
     let size = furniture.size_meters();
-    match furniture.kind {
+    let mut parts = match furniture.kind {
         Kind::Table => table(size),
         Kind::Countertop | Kind::Tabletop => vec![Solid::axis(
             size,
             Vec3::new(0.0, size.y * 0.5, 0.0),
             Surface::Top,
         )],
-        Kind::Box => vec![Solid::axis(
-            size,
-            Vec3::new(0.0, size.y * 0.5, 0.0),
-            Surface::Carcass(0),
-        )],
+        Kind::OpenShelves { shelves } => {
+            let mut parts = carcass(size);
+            parts.extend(open_shelves(size, shelves.clamp(1, 10)));
+            parts
+        }
         kind @ (Kind::Refrigerator
         | Kind::Dishwasher
         | Kind::ElectricOven
@@ -454,7 +616,52 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
             parts.extend(sliding_fronts(size));
             parts
         }
+    };
+    let leg_height = furniture.leg_height_meters();
+    if leg_height > 0.0 {
+        for part in &mut parts {
+            part.translation.y += leg_height;
+        }
+        parts.extend(adjustable_legs(size, leg_height, furniture.legs));
     }
+    parts
+}
+
+fn open_shelves(size: Vec3, count: u8) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    let t = PANEL_METERS.min(w * 0.2).min(h * 0.2).min(d * 0.2);
+    let inner_w = (w - 2.0 * t).max(0.01);
+    (1..=count)
+        .map(|index| {
+            let y = t + (h - 2.0 * t) * index as f32 / (count as f32 + 1.0);
+            Solid::axis(
+                Vec3::new(inner_w, t, d),
+                Vec3::new(0.0, y, 0.0),
+                Surface::Carcass(2),
+            )
+        })
+        .collect()
+}
+
+fn adjustable_legs(size: Vec3, height: f32, style: LegStyle) -> Vec<Solid> {
+    let foot = 0.045_f32.min(size.x * 0.15).min(size.z * 0.15);
+    let inset_x = (foot + 0.05).min(size.x * 0.35);
+    let inset_z = (foot + 0.05).min(size.z * 0.35);
+    let mut parts = Vec::with_capacity(4);
+    for x_sign in [-1.0, 1.0] {
+        for z_sign in [-1.0, 1.0] {
+            parts.push(Solid::axis(
+                Vec3::new(foot, height, foot),
+                Vec3::new(
+                    x_sign * (size.x * 0.5 - inset_x),
+                    height * 0.5,
+                    z_sign * (size.z * 0.5 - inset_z),
+                ),
+                Surface::Leg(style),
+            ));
+        }
+    }
+    parts
 }
 
 fn carcass(size: Vec3) -> Vec<Solid> {
@@ -730,6 +937,7 @@ fn appliance_handle(at: Vec3, length: f32) -> Solid {
 /// The origin is the base center. Fronts stick out a little past `depth`.
 pub fn pick_bounds(furniture: &Furniture) -> (Vec3, Vec3) {
     let size = furniture.size_meters();
+    let leg_height = furniture.leg_height_meters();
     let extra_z = if matches!(furniture.kind, Kind::LiftDoor) {
         0.25
     } else {
@@ -742,7 +950,11 @@ pub fn pick_bounds(furniture: &Furniture) -> (Vec3, Vec3) {
     };
     (
         Vec3::new(-size.x * 0.5, 0.0, -size.z * 0.5),
-        Vec3::new(size.x * 0.5, size.y + extra_y, size.z * 0.5 + extra_z),
+        Vec3::new(
+            size.x * 0.5,
+            size.y + leg_height + extra_y,
+            size.z * 0.5 + extra_z,
+        ),
     )
 }
 
@@ -811,7 +1023,15 @@ pub fn example_layout() -> Vec<(Furniture, Transform)> {
             0.0,
             280.0,
         ),
-        piece(Kind::Box, 600.0, 720.0, 560.0, 2250.0, 0.0, 280.0),
+        piece(
+            Kind::OpenShelves { shelves: 3 },
+            600.0,
+            720.0,
+            560.0,
+            2250.0,
+            0.0,
+            280.0,
+        ),
         piece(Kind::LiftDoor, 800.0, 420.0, 340.0, 1050.0, 1480.0, 170.0),
         piece(Kind::SlidingDoors, 900.0, 2100.0, 580.0, 3200.0, 0.0, 290.0),
         piece(Kind::Table, 1500.0, 750.0, 850.0, 1900.0, 0.0, 1700.0),
@@ -865,7 +1085,7 @@ pub fn ray_horizontal_plane(origin: Vec3, direction: Vec3, plane_y: f32) -> Opti
 
 // --- project files -----------------------------------------------------------
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
     pub snap_enabled: bool,
@@ -923,15 +1143,17 @@ pub struct CutPartFile {
     pub quantity: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RoomFile {
     pub width_mm: f32,
     pub depth_mm: f32,
     pub wall_height_mm: f32,
     pub show_walls: bool,
+    #[serde(default)]
+    pub openings: Vec<Opening>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PieceFile {
     pub kind: Kind,
     #[serde(default)]
@@ -944,6 +1166,10 @@ pub struct PieceFile {
     pub z_mm: f32,
     /// 0, 1, 2, or 3. See [`quarter_turns`].
     pub turns: u8,
+    #[serde(default)]
+    pub placement: Placement,
+    #[serde(default)]
+    pub legs: LegStyle,
     #[serde(default)]
     pub finishes: PartFinishes,
 }
@@ -984,9 +1210,9 @@ pub fn read_project(path: &str) -> Result<ProjectFile, ReadError> {
     };
     let file: ProjectFile =
         serde_json::from_str(&text).map_err(|error| ReadError::Invalid(error.to_string()))?;
-    if !(1..=2).contains(&file.version) {
+    if !(1..=3).contains(&file.version) {
         return Err(ReadError::Invalid(format!(
-            "layout file version is {}, this app reads versions 1 and 2",
+            "layout file version is {}, this app reads versions 1, 2, and 3",
             file.version
         )));
     }
@@ -1013,13 +1239,55 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
     }
 }
 
+pub fn sanitize_openings(
+    room_width_mm: f32,
+    room_depth_mm: f32,
+    wall_height_mm: f32,
+    openings: &mut [Opening],
+) {
+    for opening in openings {
+        let wall_length = match opening.wall {
+            WallSide::Back => room_width_mm,
+            WallSide::Left | WallSide::Right => room_depth_mm,
+        };
+        opening.width_mm = finite_or(opening.width_mm, 900.0).clamp(100.0, wall_length.max(100.0));
+        opening.height_mm = finite_or(opening.height_mm, 1000.0).clamp(100.0, wall_height_mm);
+        opening.offset_mm =
+            finite_or(opening.offset_mm, 0.0).clamp(0.0, (wall_length - opening.width_mm).max(0.0));
+        opening.sill_mm = if opening.kind == OpeningKind::Door {
+            0.0
+        } else {
+            finite_or(opening.sill_mm, 900.0)
+                .clamp(0.0, (wall_height_mm - opening.height_mm).max(0.0))
+        };
+    }
+}
+
 impl ProjectFile {
     pub fn sanitized(mut self) -> Self {
         self.room.width_mm = finite_or(self.room.width_mm, 4200.0).clamp(500.0, 30000.0);
         self.room.depth_mm = finite_or(self.room.depth_mm, 3000.0).clamp(500.0, 30000.0);
         self.room.wall_height_mm = finite_or(self.room.wall_height_mm, 2400.0).clamp(500.0, 6000.0);
+        sanitize_openings(
+            self.room.width_mm,
+            self.room.depth_mm,
+            self.room.wall_height_mm,
+            &mut self.room.openings,
+        );
         self.snap_mm = finite_or(self.snap_mm, 50.0).clamp(1.0, 500.0);
         for piece in &mut self.pieces {
+            if self.version < 3 {
+                piece.placement = if piece.kind == Kind::LiftDoor {
+                    Placement::Wall
+                } else {
+                    Placement::Floor
+                };
+                piece.legs = if piece.placement == Placement::Floor && piece.kind.is_cabinet() {
+                    LegStyle::Plastic100
+                } else {
+                    LegStyle::None
+                };
+            }
             piece.width_mm = finite_or(piece.width_mm, 600.0).clamp(50.0, 6000.0);
             piece.height_mm = finite_or(piece.height_mm, 720.0).clamp(50.0, 4000.0);
             piece.depth_mm = finite_or(piece.depth_mm, 560.0).clamp(50.0, 3000.0);
@@ -1034,10 +1302,13 @@ impl ProjectFile {
                 Kind::HingedDoors { doors } => Kind::HingedDoors {
                     doors: if doors <= 1 { 1 } else { 2 },
                 },
+                Kind::OpenShelves { shelves } => Kind::OpenShelves {
+                    shelves: shelves.clamp(1, 10),
+                },
                 other => other,
             };
             if piece.name.trim().is_empty() {
-                piece.name = piece.kind.label().to_owned();
+                piece.name = piece.kind.label_for(piece.placement).to_owned();
             }
             piece
                 .finishes
@@ -1081,8 +1352,9 @@ mod tests {
         let second_gap = centers[2] - centers[1];
         assert!((first_gap - second_gap).abs() < 1.0e-4);
         // The stack starts near the bottom and ends near the top, not bunched in the middle.
-        assert!(centers[0] < 200.0 / MM_PER_METER);
-        assert!(centers[2] > 500.0 / MM_PER_METER);
+        let leg_height = furniture.leg_height_meters();
+        assert!(centers[0] - leg_height < 200.0 / MM_PER_METER);
+        assert!(centers[2] - leg_height > 500.0 / MM_PER_METER);
         let roles: Vec<_> = solids(&furniture)
             .into_iter()
             .filter_map(|solid| match solid.role {
@@ -1096,15 +1368,15 @@ mod tests {
     #[test]
     fn each_kind_has_the_expected_number_of_boxes() {
         let cases = [
-            (Kind::Drawers { count: 3 }, 11),
-            (Kind::HingedDoors { doors: 1 }, 7),
-            (Kind::HingedDoors { doors: 2 }, 9),
+            (Kind::Drawers { count: 3 }, 15),
+            (Kind::HingedDoors { doors: 1 }, 11),
+            (Kind::HingedDoors { doors: 2 }, 13),
             (Kind::LiftDoor, 7),
-            (Kind::SlidingDoors, 9),
+            (Kind::SlidingDoors, 13),
             (Kind::Table, 5),
             (Kind::Countertop, 1),
             (Kind::Tabletop, 1),
-            (Kind::Box, 1),
+            (Kind::OpenShelves { shelves: 3 }, 12),
             (Kind::Refrigerator, 4),
             (Kind::Dishwasher, 3),
             (Kind::ElectricOven, 4),
@@ -1191,6 +1463,8 @@ mod tests {
         assert_eq!(file.version, 1);
         assert_eq!(file.pieces[0].name, "Drawer Base Cabinet");
         assert_eq!(file.pieces[0].finishes.fronts.len(), 3);
+        assert_eq!(file.pieces[0].placement, Placement::Floor);
+        assert_eq!(file.pieces[0].legs, LegStyle::Plastic100);
         assert_eq!(file.cut_list.board_width_mm, 2440.0);
         assert!(file.cut_list.parts.is_empty());
     }
@@ -1214,5 +1488,37 @@ mod tests {
         assert_eq!(selection.primary, Some(second));
         selection.toggle(second);
         assert_eq!(selection.primary, Some(first));
+    }
+
+    #[test]
+    fn stage_four_presets_and_legacy_box_migrate() {
+        let legacy: Kind = serde_json::from_str(r#"{"type":"box"}"#).unwrap();
+        assert_eq!(legacy, Kind::OpenShelves { shelves: 3 });
+
+        let (floor, floor_y) = Kind::Drawers { count: 3 }.preset(Placement::Floor);
+        assert_eq!(floor_y, 0.0);
+        assert_eq!(floor.legs, LegStyle::Plastic100);
+        assert_eq!(floor.depth_mm, 560.0);
+
+        let (wall, wall_y) = Kind::Drawers { count: 3 }.preset(Placement::Wall);
+        assert_eq!(wall_y, 1400.0);
+        assert_eq!(wall.legs, LegStyle::None);
+        assert_eq!(wall.depth_mm, 350.0);
+    }
+
+    #[test]
+    fn room_openings_are_clamped_to_their_wall() {
+        let mut openings = vec![Opening {
+            kind: OpeningKind::Window,
+            wall: WallSide::Left,
+            offset_mm: 9000.0,
+            width_mm: 4000.0,
+            height_mm: 2000.0,
+            sill_mm: 1800.0,
+        }];
+        sanitize_openings(4200.0, 3000.0, 2400.0, &mut openings);
+        assert_eq!(openings[0].width_mm, 3000.0);
+        assert_eq!(openings[0].offset_mm, 0.0);
+        assert_eq!(openings[0].sill_mm, 400.0);
     }
 }

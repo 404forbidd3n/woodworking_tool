@@ -17,10 +17,12 @@ use bevy::prelude::*;
 use bevy::winit::WinitSettings;
 use bevy_egui::EguiPlugin;
 
-use crate::cutting::{on_window_closed, CutJob, CutPlannerPass, CutWindow};
+use crate::cutting::{on_window_closed, open_requested, CutJob, CutPlannerPass, CutWindow};
 use crate::layout::edit::{
-    orbit_camera, pointer, shortcuts, sidebar, PropertiesUi, SidebarWidth, ToolbarHeight,
+    finish_native_dialog, orbit_camera, pointer, shortcuts, sidebar, PropertiesUi, SidebarWidth,
+    ToolbarHeight,
 };
+use crate::layout::history::{track_history, History};
 use crate::layout::model::{Editor, Room, Selection};
 use crate::layout::view::{draw_guides, setup_world, sync_meshes};
 
@@ -38,6 +40,8 @@ fn main() {
         .insert_resource(ToolbarHeight::default())
         .insert_resource(CutJob::default())
         .insert_resource(CutWindow::default())
+        .insert_resource(History::default())
+        .insert_non_send(layout::project::NativeDialog::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Woodworking layout".into(),
@@ -51,13 +55,25 @@ fn main() {
         // agree about what is selected. The camera transform is written last.
         .add_systems(
             Update,
-            (pointer, shortcuts, orbit_camera, on_window_closed).chain(),
+            (
+                open_requested,
+                finish_native_dialog,
+                pointer,
+                shortcuts,
+                orbit_camera,
+                on_window_closed,
+            )
+                .chain(),
         )
-        .add_systems(bevy_egui::EguiPrimaryContextPass, sidebar)
+        .add_systems(
+            bevy_egui::EguiPrimaryContextPass,
+            (layout::dimensions::draw_widths, sidebar).chain(),
+        )
         .add_systems(CutPlannerPass, cutting::ui_draw)
         // New boxes have to exist before transforms propagate, or a resized
         // cabinet would lag a frame behind its outline.
         .add_systems(PostUpdate, sync_meshes.before(TransformSystems::Propagate))
+        .add_systems(PostUpdate, track_history.after(sync_meshes))
         .add_systems(PostUpdate, draw_guides.after(TransformSystems::Propagate))
         .run();
 }

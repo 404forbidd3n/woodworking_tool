@@ -7,19 +7,21 @@
 
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{PrimaryWindow, RequestRedraw};
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::cutting::{self, CutJob, CutWindow};
 use crate::theme::{self, dropdown, toolbar_frame};
 
+use crate::layout::history::History;
 use crate::layout::model::{
     example_layout, m_to_mm, mm_to_m, pick_bounds, place, quarter_turns, ray_aabb,
-    ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns, snap_to_step,
-    write_project, Editor, Finish, FinishPreset, Furniture, Kind, ProjectFile, ReadError, Room,
-    Selection,
+    ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns,
+    sanitize_openings, snap_to_step, write_project, Editor, Finish, FinishPreset, Furniture, Kind,
+    LegStyle, Opening, OpeningKind, Placement, ProjectFile, ReadError, Room, Selection, WallSide,
 };
+use crate::layout::project::{self, DialogRequest, NativeDialog};
 use crate::layout::view::{self, OrbitCamera};
 
 /// Width of the sidebar in logical pixels. The 3D view ignores the pointer
@@ -103,7 +105,8 @@ pub fn pointer(
             return;
         };
         if !mouse.pressed(button) {
-            if drag.deselect_if_click && drag.moved_px < 5.0 {
+            // A click that dismisses the color picker must not also clear the selection.
+            if drag.deselect_if_click && drag.moved_px < 5.0 && !egui.is_popup_open() {
                 selection.clear();
             }
             if button == MouseButton::Right && drag.moved_px < 5.0 {
@@ -164,8 +167,12 @@ pub fn pointer(
     }
 
     // A drag that starts on the sidebar, or on a slider that is already
-    // being dragged, must not orbit the room.
-    if over_chrome(&window, &sidebar, &toolbar, &properties) || egui.is_using_pointer() {
+    // being dragged, must not orbit the room. The custom-color popup floats
+    // over the stage, so those clicks belong to egui as well.
+    if over_chrome(&window, &sidebar, &toolbar, &properties)
+        || egui.is_using_pointer()
+        || egui.is_popup_open()
+    {
         return;
     }
 
@@ -441,7 +448,8 @@ pub fn sidebar(
     mut toolbar_height: ResMut<ToolbarHeight>,
     mut cut_job: ResMut<CutJob>,
     mut cut_window: ResMut<CutWindow>,
-    cut_windows: Query<Entity, With<cutting::CutPlannerWindow>>,
+    mut history: ResMut<History>,
+    mut dialogs: NonSendMut<NativeDialog>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -450,8 +458,40 @@ pub fn sidebar(
     // Cmd+S is read here so it still saves when Project is collapsed.
     let save_shortcut =
         ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::S));
+    let redo_modifiers = egui::Modifiers {
+        command: true,
+        shift: true,
+        ..default()
+    };
+    let redo_shortcut = ctx.input_mut(|input| {
+        input.consume_key(redo_modifiers, egui::Key::Z)
+            || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+    });
+    let undo_shortcut = !redo_shortcut
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z));
     if save_shortcut {
         save_layout(&mut editor, &room, &pieces, &cut_job);
+    }
+    if undo_shortcut {
+        perform_history(
+            false,
+            &mut history,
+            &mut commands,
+            &mut room,
+            &mut editor,
+            &mut selection,
+            &pieces,
+        );
+    } else if redo_shortcut {
+        perform_history(
+            true,
+            &mut history,
+            &mut commands,
+            &mut room,
+            &mut editor,
+            &mut selection,
+            &pieces,
+        );
     }
 
     // egui 0.36 draws panels into a root Ui instead of straight onto the context.
@@ -472,11 +512,11 @@ pub fn sidebar(
                 &mut room,
                 &mut editor,
                 &mut selection,
-                &mut camera,
                 &pieces,
                 &mut cut_job,
                 &mut cut_window,
-                &cut_windows,
+                &mut history,
+                &mut dialogs,
             );
         });
     toolbar_height.0 = toolbar.response.rect.height();
@@ -490,13 +530,11 @@ pub fn sidebar(
                 dropdown(ui, "Project", false, |ui| {
                     draw_project(
                         ui,
-                        &mut commands,
                         &mut room,
                         &mut editor,
-                        &mut selection,
-                        &mut camera,
                         &pieces,
                         &mut cut_job,
+                        &mut dialogs,
                     );
                 });
 
@@ -553,21 +591,120 @@ pub fn sidebar(
                         room.show_walls = walls;
                         room.dirty = true;
                     }
+                    ui.separator();
+                    ui.strong("Doors & windows");
+                    let mut remove = None;
+                    let mut openings_changed = false;
+                    for (index, opening) in room.openings.iter_mut().enumerate() {
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt(("opening_kind", index))
+                                    .selected_text(match opening.kind {
+                                        OpeningKind::Door => "Door",
+                                        OpeningKind::Window => "Window",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        openings_changed |= ui
+                                            .selectable_value(
+                                                &mut opening.kind,
+                                                OpeningKind::Door,
+                                                "Door",
+                                            )
+                                            .changed();
+                                        openings_changed |= ui
+                                            .selectable_value(
+                                                &mut opening.kind,
+                                                OpeningKind::Window,
+                                                "Window",
+                                            )
+                                            .changed();
+                                    });
+                                egui::ComboBox::from_id_salt(("opening_wall", index))
+                                    .selected_text(match opening.wall {
+                                        WallSide::Back => "Back wall",
+                                        WallSide::Left => "Left wall",
+                                        WallSide::Right => "Right wall",
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        for (wall, label) in [
+                                            (WallSide::Back, "Back wall"),
+                                            (WallSide::Left, "Left wall"),
+                                            (WallSide::Right, "Right wall"),
+                                        ] {
+                                            openings_changed |= ui
+                                                .selectable_value(&mut opening.wall, wall, label)
+                                                .changed();
+                                        }
+                                    });
+                                if ui.button("Remove").clicked() {
+                                    remove = Some(index);
+                                }
+                            });
+                            openings_changed |=
+                                mm_row(ui, "Position", &mut opening.offset_mm, 0.0..=30000.0);
+                            openings_changed |=
+                                mm_row(ui, "Width", &mut opening.width_mm, 100.0..=10000.0);
+                            openings_changed |=
+                                mm_row(ui, "Height", &mut opening.height_mm, 100.0..=6000.0);
+                            if opening.kind == OpeningKind::Window {
+                                openings_changed |=
+                                    mm_row(ui, "Sill height", &mut opening.sill_mm, 0.0..=5000.0);
+                            } else {
+                                opening.sill_mm = 0.0;
+                            }
+                        });
+                    }
+                    room.dirty |= openings_changed;
+                    if let Some(index) = remove {
+                        room.openings.remove(index);
+                        room.dirty = true;
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Add door").clicked() {
+                            room.openings.push(Opening::door());
+                            room.dirty = true;
+                        }
+                        if ui.button("Add window").clicked() {
+                            room.openings.push(Opening::window());
+                            room.dirty = true;
+                        }
+                    });
+                    if room.dirty {
+                        sanitize_openings(
+                            room.width_mm,
+                            room.depth_mm,
+                            room.wall_height_mm,
+                            &mut room.openings,
+                        );
+                    }
                 });
 
                 dropdown(ui, "Add Furniture", false, |ui| {
-                    let library = [
+                    let existing = pieces.iter().len();
+                    ui.strong("Floor");
+                    for (label, kind) in [
                         ("Drawer Base Cabinet", Kind::Drawers { count: 3 }),
                         ("Door Base Cabinet", Kind::HingedDoors { doors: 2 }),
-                        ("Wall Lift-Up Cabinet", Kind::LiftDoor),
                         ("Sliding-Door Cabinet", Kind::SlidingDoors),
+                        ("Open Shelf Cabinet", Kind::OpenShelves { shelves: 3 }),
                         ("Work Table", Kind::Table),
-                        ("Custom Block", Kind::Box),
-                    ];
-                    let existing = pieces.iter().len();
-                    for (label, kind) in library {
+                    ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity = add_piece(&mut commands, &room, kind, existing);
+                            let entity =
+                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
+                            selection.set_only(entity);
+                        }
+                    }
+                    ui.add_space(6.0);
+                    ui.strong("Wall mounted");
+                    for (label, kind) in [
+                        ("Wall Door Cabinet", Kind::HingedDoors { doors: 2 }),
+                        ("Wall Lift-Up Cabinet", Kind::LiftDoor),
+                        ("Wall Drawer Cabinet", Kind::Drawers { count: 3 }),
+                    ] {
+                        if library_button(ui, label, kind).clicked() {
+                            let entity =
+                                add_piece(&mut commands, &room, kind, Placement::Wall, existing);
                             selection.set_only(entity);
                         }
                     }
@@ -580,7 +717,8 @@ pub fn sidebar(
                         ("Tabletop", Kind::Tabletop),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity = add_piece(&mut commands, &room, kind, existing);
+                            let entity =
+                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
                             selection.set_only(entity);
                         }
                     }
@@ -596,7 +734,8 @@ pub fn sidebar(
                         ("Microwave", Kind::Microwave),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity = add_piece(&mut commands, &room, kind, existing);
+                            let entity =
+                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
                             selection.set_only(entity);
                         }
                     }
@@ -610,7 +749,7 @@ pub fn sidebar(
                                 entity,
                                 format!(
                                     "{}   {:.0} × {:.0} × {:.0}",
-                                    furniture.kind.label(),
+                                    furniture.label(),
                                     furniture.width_mm,
                                     furniture.height_mm,
                                     furniture.depth_mm
@@ -714,11 +853,11 @@ fn draw_toolbar(
     room: &mut Room,
     editor: &mut Editor,
     selection: &mut Selection,
-    camera: &mut Query<&mut OrbitCamera>,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
     cut_job: &mut CutJob,
     cut_window: &mut CutWindow,
-    cut_windows: &Query<Entity, With<cutting::CutPlannerWindow>>,
+    history: &mut History,
+    dialogs: &mut NativeDialog,
 ) {
     let cream = egui::Color32::from_rgb(246, 236, 220);
     let muted = egui::Color32::from_rgb(214, 196, 170);
@@ -743,14 +882,29 @@ fn draw_toolbar(
                 );
             });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(history.can_redo(), egui::Button::new("Redo"))
+                .clicked()
+            {
+                perform_history(true, history, commands, room, editor, selection, pieces);
+            }
+            if ui
+                .add_enabled(history.can_undo(), egui::Button::new("Undo"))
+                .clicked()
+            {
+                perform_history(false, history, commands, room, editor, selection, pieces);
+            }
             if ui.button("Load").clicked() {
-                load_layout(commands, pieces, room, editor, selection, camera, cut_job);
+                begin_dialog(dialogs, editor, DialogRequest::Open);
             }
             if ui.button("Save").clicked() {
                 save_layout(editor, room, pieces, cut_job);
             }
+            if ui.button("Save As").clicked() {
+                begin_dialog(dialogs, editor, DialogRequest::Save);
+            }
             if ui.button("Cut planner").clicked() {
-                cutting::open_window(commands, cut_window, cut_windows);
+                cutting::request_open(cut_window);
             }
             if !editor.status.is_empty() {
                 let color = if error {
@@ -859,7 +1013,15 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 egui::pos2(rect.right() - 3.0, rect.top() + 5.0),
             );
         }
-        Kind::Box => {}
+        Kind::OpenShelves { shelves } => {
+            for index in 1..=shelves {
+                let fraction = index as f32 / (shelves as f32 + 1.0);
+                line(
+                    egui::pos2(rect.left(), egui::lerp(rect.y_range(), fraction)),
+                    egui::pos2(rect.right(), egui::lerp(rect.y_range(), fraction)),
+                );
+            }
+        }
     }
 }
 
@@ -964,8 +1126,14 @@ fn mm_row(
     .changed()
 }
 
-fn add_piece(commands: &mut Commands, room: &Room, kind: Kind, already_there: usize) -> Entity {
-    let (furniture, y_mm) = kind.preset();
+fn add_piece(
+    commands: &mut Commands,
+    room: &Room,
+    kind: Kind,
+    placement: Placement,
+    already_there: usize,
+) -> Entity {
+    let (furniture, y_mm) = kind.preset(placement);
     // Step new pieces sideways so a second cabinet does not hide inside the first.
     let column = (already_there % 4) as f32;
     let x_mm = room.width_mm * 0.5 + (column - 1.5) * 180.0;
@@ -983,7 +1151,7 @@ fn draw_properties(
     let Ok((_, mut furniture, mut transform)) = pieces.get_mut(entity) else {
         return;
     };
-    ui.strong(furniture.kind.label());
+    ui.strong(furniture.label());
     ui.horizontal(|ui| {
         ui.label("Name");
         ui.text_edit_singleline(&mut furniture.name);
@@ -1040,6 +1208,19 @@ fn draw_properties(
         Kind::SlidingDoors => {
             ui.label("Two leaves, one in front of the other.");
         }
+        Kind::OpenShelves { shelves } => {
+            let mut count = shelves as i32;
+            if ui
+                .add(egui::Slider::new(&mut count, 1..=10).text("Shelves"))
+                .changed()
+            {
+                furniture.kind = Kind::OpenShelves {
+                    shelves: count as u8,
+                };
+                furniture.dirty = true;
+            }
+            ui.label("Open-front cabinet with evenly spaced shelves.");
+        }
         Kind::Table => {
             ui.label("Top and four legs. Height is the top surface.");
         }
@@ -1049,15 +1230,40 @@ fn draw_properties(
         Kind::Tabletop => {
             ui.label("Standalone tabletop. Height is its thickness.");
         }
-        Kind::Box => {
-            ui.label("Empty box. Use it for a sink, an appliance, or a gap.");
-        }
         Kind::Refrigerator
         | Kind::Dishwasher
         | Kind::ElectricOven
         | Kind::CoffeeMachine
         | Kind::Microwave => {
             ui.label("Stylized appliance model with editable overall dimensions.");
+        }
+    }
+
+    if furniture.kind.is_cabinet() {
+        ui.horizontal(|ui| {
+            ui.label("Placement");
+            ui.strong(match furniture.placement {
+                Placement::Floor => "Floor",
+                Placement::Wall => "Wall mounted",
+            });
+        });
+        if furniture.placement == Placement::Floor {
+            ui.horizontal(|ui| {
+                ui.label("Legs");
+                egui::ComboBox::from_id_salt((entity, "legs"))
+                    .selected_text(furniture.legs.label())
+                    .show_ui(ui, |ui| {
+                        for style in LegStyle::ALL {
+                            if ui
+                                .selectable_value(&mut furniture.legs, style, style.label())
+                                .changed()
+                            {
+                                furniture.dirty = true;
+                            }
+                        }
+                    });
+            });
+            ui.weak("Cabinet height is the carcass; legs add to installed height.");
         }
     }
 
@@ -1091,80 +1297,85 @@ fn draw_properties(
         }
     });
 
-    egui::CollapsingHeader::new(egui::RichText::new("Materials & colors").strong())
-        .default_open(true)
-        .show(ui, |ui| {
-            if furniture.kind.is_cabinet() {
-                let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
-                for (index, label) in wall_names.into_iter().enumerate() {
-                    if finish_row(
-                        ui,
-                        (entity, "wall", index),
-                        label,
-                        &mut furniture.finishes.carcass[index],
-                    ) {
-                        furniture.dirty = true;
-                    }
-                }
-                for index in 0..furniture.finishes.fronts.len() {
-                    if finish_row(
-                        ui,
-                        (entity, "front", index),
-                        &format!("Front {}", index + 1),
-                        &mut furniture.finishes.fronts[index],
-                    ) {
-                        furniture.dirty = true;
-                    }
-                }
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Materials & colors")
+            .strong()
+            .size(15.0)
+            .color(egui::Color32::BLACK),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        if furniture.kind.is_cabinet() {
+            let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
+            for (index, label) in wall_names.into_iter().enumerate() {
                 if finish_row(
                     ui,
-                    (entity, "handle", 0),
-                    "Handles",
-                    &mut furniture.finishes.handles,
+                    (entity, "wall", index),
+                    label,
+                    &mut furniture.finishes.carcass[index],
                 ) {
                     furniture.dirty = true;
                 }
             }
-            if matches!(furniture.kind, Kind::Table | Kind::Box)
-                && finish_row(
+            for index in 0..furniture.finishes.fronts.len() {
+                if finish_row(
                     ui,
-                    (entity, "frame", 0),
-                    if furniture.kind == Kind::Table {
-                        "Frame / legs"
-                    } else {
-                        "Block"
-                    },
-                    &mut furniture.finishes.carcass[0],
-                )
-            {
+                    (entity, "front", index),
+                    &format!("Front {}", index + 1),
+                    &mut furniture.finishes.fronts[index],
+                ) {
+                    furniture.dirty = true;
+                }
+            }
+            if finish_row(
+                ui,
+                (entity, "handle", 0),
+                "Handles",
+                &mut furniture.finishes.handles,
+            ) {
                 furniture.dirty = true;
             }
-            if matches!(
-                furniture.kind,
-                Kind::Table | Kind::Countertop | Kind::Tabletop
-            ) && finish_row(ui, (entity, "top", 0), "Top", &mut furniture.finishes.top)
-            {
+        }
+        if matches!(furniture.kind, Kind::Table)
+            && finish_row(
+                ui,
+                (entity, "frame", 0),
+                if furniture.kind == Kind::Table {
+                    "Frame / legs"
+                } else {
+                    "Block"
+                },
+                &mut furniture.finishes.carcass[0],
+            )
+        {
+            furniture.dirty = true;
+        }
+        if matches!(
+            furniture.kind,
+            Kind::Table | Kind::Countertop | Kind::Tabletop
+        ) && finish_row(ui, (entity, "top", 0), "Top", &mut furniture.finishes.top)
+        {
+            furniture.dirty = true;
+        }
+        if furniture.kind.is_appliance() {
+            if finish_row(
+                ui,
+                (entity, "appliance", 0),
+                "Appliance body",
+                &mut furniture.finishes.appliance,
+            ) {
                 furniture.dirty = true;
             }
-            if furniture.kind.is_appliance() {
-                if finish_row(
-                    ui,
-                    (entity, "appliance", 0),
-                    "Appliance body",
-                    &mut furniture.finishes.appliance,
-                ) {
-                    furniture.dirty = true;
-                }
-                if finish_row(
-                    ui,
-                    (entity, "handle", 1),
-                    "Handles",
-                    &mut furniture.finishes.handles,
-                ) {
-                    furniture.dirty = true;
-                }
+            if finish_row(
+                ui,
+                (entity, "handle", 1),
+                "Handles",
+                &mut furniture.finishes.handles,
+            ) {
+                furniture.dirty = true;
             }
-        });
+        }
+    });
 
     let mut duplicate = None;
     let mut delete = false;
@@ -1247,15 +1458,39 @@ fn despawn_all(commands: &mut Commands, rows: &[(Entity, String)]) {
     }
 }
 
-fn draw_project(
-    ui: &mut egui::Ui,
+fn perform_history(
+    redo: bool,
+    history: &mut History,
     commands: &mut Commands,
     room: &mut Room,
     editor: &mut Editor,
     selection: &mut Selection,
-    camera: &mut Query<&mut OrbitCamera>,
+    pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
+) {
+    let files = pieces
+        .iter()
+        .map(|(_, furniture, transform)| view::piece_file(furniture, transform))
+        .collect();
+    let current = project::from_files(room, editor, files);
+    let target = if redo {
+        history.redo(current)
+    } else {
+        history.undo(current)
+    };
+    if let Some(target) = target {
+        let existing: Vec<_> = pieces.iter().map(|(entity, _, _)| entity).collect();
+        project::restore(target, commands, room, editor, selection, &existing);
+        editor.status = if redo { "Redone" } else { "Undone" }.into();
+    }
+}
+
+fn draw_project(
+    ui: &mut egui::Ui,
+    room: &mut Room,
+    editor: &mut Editor,
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
     cut_job: &mut CutJob,
+    dialogs: &mut NativeDialog,
 ) {
     ui.weak("File in the project folder");
     ui.add(egui::TextEdit::singleline(&mut editor.path).desired_width(f32::INFINITY));
@@ -1263,8 +1498,11 @@ fn draw_project(
         if ui.button("Save").clicked() {
             save_layout(editor, room, pieces, cut_job);
         }
+        if ui.button("Save As").clicked() {
+            begin_dialog(dialogs, editor, DialogRequest::Save);
+        }
         if ui.button("Load").clicked() {
-            load_layout(commands, pieces, room, editor, selection, camera, cut_job);
+            begin_dialog(dialogs, editor, DialogRequest::Open);
         }
     });
     ui.weak("Cmd+S also saves.");
@@ -1294,6 +1532,59 @@ fn save_layout(
     info!("{}", editor.status);
 }
 
+fn begin_dialog(dialogs: &mut NativeDialog, editor: &mut Editor, request: DialogRequest) {
+    if dialogs.is_open() {
+        return;
+    }
+    match request {
+        DialogRequest::Save => dialogs.begin_save(&editor.path),
+        DialogRequest::Open => dialogs.begin_open(&editor.path),
+    }
+    editor.status = "Choose a file".into();
+}
+
+/// Applies a finished Load or Save As dialog. The panel itself stays open
+/// without stopping the 3D window.
+pub fn finish_native_dialog(
+    mut dialogs: NonSendMut<NativeDialog>,
+    mut redraws: MessageWriter<RequestRedraw>,
+    mut commands: Commands,
+    pieces: Query<(Entity, &mut Furniture, &mut Transform)>,
+    mut room: ResMut<Room>,
+    mut editor: ResMut<Editor>,
+    mut selection: ResMut<Selection>,
+    mut camera: Query<&mut OrbitCamera>,
+    mut cut_job: ResMut<CutJob>,
+    mut history: ResMut<History>,
+) {
+    if dialogs.is_open() {
+        redraws.write(RequestRedraw);
+    }
+    let Some((request, path)) = dialogs.poll() else {
+        return;
+    };
+    let Some(path) = path else {
+        editor.status = "Cancelled".into();
+        return;
+    };
+    editor.path = path.display().to_string();
+    match request {
+        DialogRequest::Save => save_layout(&mut editor, &room, &pieces, &cut_job),
+        DialogRequest::Open => {
+            load_layout(
+                &mut commands,
+                &pieces,
+                &mut room,
+                &mut editor,
+                &mut selection,
+                &mut camera,
+                &mut cut_job,
+            );
+            *history = History::default();
+        }
+    }
+}
+
 fn write_current(
     path: &std::path::Path,
     snap_enabled: bool,
@@ -1303,7 +1594,7 @@ fn write_current(
     cut_job: &CutJob,
 ) -> Result<(), String> {
     let file = ProjectFile {
-        version: 2,
+        version: 3,
         snap_enabled,
         snap_mm,
         room: view::saved_room(room),
@@ -1395,29 +1686,15 @@ fn load_layout(
     match read_project(&path.to_string_lossy()) {
         Ok(file) => {
             let file = file.sanitized();
-            for entity in existing {
-                commands.entity(entity).despawn();
-            }
-            room.width_mm = file.room.width_mm;
-            room.depth_mm = file.room.depth_mm;
-            room.wall_height_mm = file.room.wall_height_mm;
-            room.show_walls = file.room.show_walls;
-            room.dirty = true;
-            editor.snap_enabled = file.snap_enabled;
-            editor.snap_mm = file.snap_mm;
             *cut_job = CutJob::from_file(&file.cut_list);
-            for piece in file.pieces {
-                let mut furniture =
-                    Furniture::new(piece.kind, piece.width_mm, piece.height_mm, piece.depth_mm);
-                furniture.name = piece.name;
-                furniture.finishes = piece.finishes;
-                furniture.ensure_front_finishes();
-                commands.spawn((
-                    furniture,
-                    place(piece.x_mm, piece.y_mm, piece.z_mm, piece.turns),
-                ));
-            }
-            selection.clear();
+            project::restore(
+                project::from_project(&file),
+                commands,
+                room,
+                editor,
+                selection,
+                &existing,
+            );
             if let Ok(mut orbit) = camera.single_mut() {
                 orbit.frame_room(room);
             }

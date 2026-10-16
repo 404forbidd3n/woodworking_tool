@@ -11,411 +11,13 @@
   "pieces": [
     {
       "kind": {
-        "type": "drawers",
-        "count": 3
-      },
-      "name": "Drawer Base Cabinet",
-      "width_mm": 600.0,
-      "height_mm": 720.0,
-      "depth_mm": 560.0,
-      "x_mm": 350.0,
-      "y_mm": 0.0,
-      "z_mm": 250.0,
-      "turns": 0,
-      "finishes": {
-        "carcass": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "fronts": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "handles": {
-          "preset": "charcoal",
-          "color": [
-            55,
-            58,
-            60
-          ]
-        },
-        "top": {
-          "preset": "walnut",
-          "color": [
-            104,
-            70,
-            45
-          ]
-        },
-        "appliance": {
-          "preset": "stainless_steel",
-          "color": [
-            165,
-            172,
-            175
-          ]
-        }
-      }
-    },
-    {
-      "kind": {
-        "type": "hinged_doors",
-        "doors": 2
-      },
-      "name": "Double-Door Base Cabinet",
-      "width_mm": 800.0,
-      "height_mm": 720.0,
-      "depth_mm": 560.0,
-      "x_mm": 1050.0001,
-      "y_mm": 0.0,
-      "z_mm": 250.0,
-      "turns": 0,
-      "finishes": {
-        "carcass": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "fronts": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "handles": {
-          "preset": "charcoal",
-          "color": [
-            55,
-            58,
-            60
-          ]
-        },
-        "top": {
-          "preset": "walnut",
-          "color": [
-            104,
-            70,
-            45
-          ]
-        },
-        "appliance": {
-          "preset": "stainless_steel",
-          "color": [
-            165,
-            172,
-            175
-          ]
-        }
-      }
-    },
-    {
-      "kind": {
-        "type": "lift_door"
-      },
-      "name": "Wall Lift-Up Cabinet",
-      "width_mm": 800.0,
-      "height_mm": 420.0,
-      "depth_mm": 340.0,
-      "x_mm": 1050.0001,
-      "y_mm": 1480.0,
-      "z_mm": 150.0,
-      "turns": 0,
-      "finishes": {
-        "carcass": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "fronts": [
-          {
-            "preset": "white",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "handles": {
-          "preset": "charcoal",
-          "color": [
-            55,
-            58,
-            60
-          ]
-        },
-        "top": {
-          "preset": "walnut",
-          "color": [
-            104,
-            70,
-            45
-          ]
-        },
-        "appliance": {
-          "preset": "stainless_steel",
-          "color": [
-            165,
-            172,
-            175
-          ]
-        }
-      }
-    },
-    {
-      "kind": {
-        "type": "sliding_doors"
-      },
-      "name": "Sliding-Door Cabinet",
-      "width_mm": 900.0,
-      "height_mm": 2100.0,
-      "depth_mm": 580.0,
-      "x_mm": 1900.0013,
-      "y_mm": 0.0,
-      "z_mm": 250.0,
-      "turns": 0,
-      "finishes": {
-        "carcass": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "fronts": [
-          {
-            "preset": "oak",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          },
-          {
-            "preset": "charcoal",
-            "color": [
-              181,
-              137,
-              84
-            ]
-          }
-        ],
-        "handles": {
-          "preset": "charcoal",
-          "color": [
-            55,
-            58,
-            60
-          ]
-        },
-        "top": {
-          "preset": "walnut",
-          "color": [
-            104,
-            70,
-            45
-          ]
-        },
-        "appliance": {
-          "preset": "stainless_steel",
-          "color": [
-            165,
-            172,
-            175
-          ]
-        }
-      }
-    },
-    {
-      "kind": {
         "type": "electric_oven"
       },
       "name": "Electric Oven",
       "width_mm": 600.0,
       "height_mm": 600.0,
       "depth_mm": 570.0,
-      "x_mm": 2949.9993,
+      "x_mm": 3450.0,
       "y_mm": 140.0,
       "z_mm": 350.0,
       "turns": 0,
@@ -488,6 +90,417 @@
           ]
         }
       }
+    },
+    {
+      "kind": {
+        "type": "drawers",
+        "count": 2
+      },
+      "name": "Drawer Base Cabinet",
+      "width_mm": 500.0,
+      "height_mm": 800.0,
+      "depth_mm": 560.0,
+      "x_mm": 500.0,
+      "y_mm": 0.0,
+      "z_mm": 310.0,
+      "turns": 0,
+      "finishes": {
+        "carcass": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "fronts": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "handles": {
+          "preset": "charcoal",
+          "color": [
+            55,
+            58,
+            60
+          ]
+        },
+        "top": {
+          "preset": "walnut",
+          "color": [
+            104,
+            70,
+            45
+          ]
+        },
+        "appliance": {
+          "preset": "stainless_steel",
+          "color": [
+            165,
+            172,
+            175
+          ]
+        }
+      }
+    },
+    {
+      "kind": {
+        "type": "box"
+      },
+      "name": "Custom Block",
+      "width_mm": 500.0,
+      "height_mm": 1300.0,
+      "depth_mm": 580.0,
+      "x_mm": 500.0,
+      "y_mm": 800.0,
+      "z_mm": 330.0,
+      "turns": 0,
+      "finishes": {
+        "carcass": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "fronts": [],
+        "handles": {
+          "preset": "charcoal",
+          "color": [
+            55,
+            58,
+            60
+          ]
+        },
+        "top": {
+          "preset": "walnut",
+          "color": [
+            104,
+            70,
+            45
+          ]
+        },
+        "appliance": {
+          "preset": "stainless_steel",
+          "color": [
+            165,
+            172,
+            175
+          ]
+        }
+      }
+    },
+    {
+      "kind": {
+        "type": "hinged_doors",
+        "doors": 2
+      },
+      "name": "Double-Door Base Cabinet",
+      "width_mm": 800.0,
+      "height_mm": 650.0,
+      "depth_mm": 350.0,
+      "x_mm": 1150.0,
+      "y_mm": 1400.0,
+      "z_mm": 150.0,
+      "turns": 0,
+      "finishes": {
+        "carcass": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "fronts": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "handles": {
+          "preset": "charcoal",
+          "color": [
+            55,
+            58,
+            60
+          ]
+        },
+        "top": {
+          "preset": "walnut",
+          "color": [
+            104,
+            70,
+            45
+          ]
+        },
+        "appliance": {
+          "preset": "stainless_steel",
+          "color": [
+            165,
+            172,
+            175
+          ]
+        }
+      }
+    },
+    {
+      "kind": {
+        "type": "hinged_doors",
+        "doors": 2
+      },
+      "name": "Double-Door Base Cabinet",
+      "width_mm": 800.0,
+      "height_mm": 650.0,
+      "depth_mm": 350.0,
+      "x_mm": 1950.0,
+      "y_mm": 1400.0,
+      "z_mm": 150.0,
+      "turns": 0,
+      "finishes": {
+        "carcass": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "fronts": [
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          },
+          {
+            "preset": "oak",
+            "color": [
+              181,
+              137,
+              84
+            ]
+          }
+        ],
+        "handles": {
+          "preset": "charcoal",
+          "color": [
+            55,
+            58,
+            60
+          ]
+        },
+        "top": {
+          "preset": "walnut",
+          "color": [
+            104,
+            70,
+            45
+          ]
+        },
+        "appliance": {
+          "preset": "stainless_steel",
+          "color": [
+            165,
+            172,
+            175
+          ]
+        }
+      }
     }
-  ]
+  ],
+  "cut_list": {
+    "board_width_mm": 1525.0,
+    "board_height_mm": 1525.0,
+    "thickness_mm": 18.0,
+    "kerf_mm": 3.0,
+    "trim_mm": 0.0,
+    "allow_rotate": true,
+    "draft_role": "Bottom",
+    "draft_name": "",
+    "draft_width_mm": 800.0,
+    "draft_height_mm": 340.0,
+    "draft_quantity": 2,
+    "parts": [
+      {
+        "name": "Usi",
+        "role": "Door",
+        "width_mm": 400.0,
+        "height_mm": 650.0,
+        "quantity": 4
+      },
+      {
+        "name": "Partea de jos",
+        "role": "Bottom",
+        "width_mm": 800.0,
+        "height_mm": 340.0,
+        "quantity": 2
+      }
+    ]
+  }
 }

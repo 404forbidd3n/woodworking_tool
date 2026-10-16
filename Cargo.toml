@@ -10,6 +10,7 @@ bevy = "0.20"
 bevy_egui = "0.43"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rfd = "0.15"
 
 # Debug builds of Bevy are too slow to use as a layout tool.
 # Optimize dependencies so `cargo run` is actually workable.
