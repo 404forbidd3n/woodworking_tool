@@ -19,7 +19,8 @@ use crate::layout::model::{
     example_layout, m_to_mm, mm_to_m, pick_bounds, place, quarter_turns, ray_aabb,
     ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns,
     sanitize_openings, snap_to_step, write_project, Editor, Finish, FinishPreset, Furniture, Kind,
-    LegStyle, Opening, OpeningKind, Placement, ProjectFile, ReadError, Room, Selection, WallSide,
+    LegStyle, Opening, OpeningKind, PipeColor, Placement, ProjectFile, ReadError, Room, Selection,
+    WallSide, PIPE_PAIR_GAP_MM,
 };
 use crate::layout::project::{self, DialogRequest, NativeDialog};
 use crate::layout::view::{self, OrbitCamera};
@@ -95,6 +96,7 @@ pub fn pointer(
     keys: Res<ButtonInput<KeyCode>>,
     motion: Res<AccumulatedMouseMotion>,
     editor: Res<Editor>,
+    room: Res<Room>,
     egui: Res<EguiWantsInput>,
     sidebar: Res<SidebarWidth>,
     toolbar: Res<ToolbarHeight>,
@@ -197,7 +199,7 @@ pub fn pointer(
 
     if button == MouseButton::Right {
         if let Some((origin, direction)) = cursor_ray(&window, &camera) {
-            if let Some((entity, _)) = pick_piece(origin, direction, &pieces) {
+            if let Some((entity, _)) = pick_piece(origin, direction, &pieces, room.edit_enabled) {
                 let position = window
                     .iter()
                     .next()
@@ -222,7 +224,7 @@ pub fn pointer(
         drag.reset();
         return;
     };
-    if let Some((entity, transform)) = pick_piece(origin, direction, &pieces) {
+    if let Some((entity, transform)) = pick_piece(origin, direction, &pieces, room.edit_enabled) {
         let additive = keys.pressed(KeyCode::ControlLeft)
             || keys.pressed(KeyCode::ControlRight)
             || keys.pressed(KeyCode::SuperLeft)
@@ -246,6 +248,7 @@ pub fn pointer(
                 pieces
                     .get(*selected)
                     .ok()
+                    .filter(|(_, furniture, _, _)| room.edit_enabled || !furniture.kind.is_pipe())
                     .map(|(_, _, transform, _)| (*selected, transform.translation))
             })
             .collect();
@@ -291,7 +294,11 @@ pub fn shortcuts(
         return;
     }
 
-    selection.retain(|entity| pieces.get(entity).is_ok());
+    selection.retain(|entity| {
+        pieces
+            .get(entity)
+            .is_ok_and(|(_, furniture, _)| room.edit_enabled || !furniture.kind.is_pipe())
+    });
     if selection.is_empty() {
         if keys.just_pressed(KeyCode::KeyF) {
             if let Ok(mut orbit) = camera.single_mut() {
@@ -577,106 +584,148 @@ pub fn sidebar(
                 });
 
                 dropdown(ui, "Room", true, |ui| {
-                    let mut width = room.width_mm;
-                    let mut depth = room.depth_mm;
-                    let mut height = room.wall_height_mm;
-                    let mut walls = room.show_walls;
-                    let room_changed = mm_row(ui, "Width", &mut width, 500.0..=30000.0)
-                        | mm_row(ui, "Depth", &mut depth, 500.0..=30000.0)
-                        | mm_row(ui, "Wall height", &mut height, 500.0..=6000.0);
-                    if ui.checkbox(&mut walls, "Show walls").changed() || room_changed {
-                        room.width_mm = width;
-                        room.depth_mm = depth;
-                        room.wall_height_mm = height;
-                        room.show_walls = walls;
+                    let mut show_walls = room.show_walls;
+                    if ui.checkbox(&mut show_walls, "Show walls").changed() {
+                        room.show_walls = show_walls;
                         room.dirty = true;
                     }
-                    ui.separator();
-                    ui.strong("Doors & windows");
-                    let mut remove = None;
-                    let mut openings_changed = false;
-                    for (index, opening) in room.openings.iter_mut().enumerate() {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                egui::ComboBox::from_id_salt(("opening_kind", index))
-                                    .selected_text(match opening.kind {
-                                        OpeningKind::Door => "Door",
-                                        OpeningKind::Window => "Window",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        openings_changed |= ui
-                                            .selectable_value(
-                                                &mut opening.kind,
-                                                OpeningKind::Door,
-                                                "Door",
-                                            )
-                                            .changed();
-                                        openings_changed |= ui
-                                            .selectable_value(
-                                                &mut opening.kind,
-                                                OpeningKind::Window,
-                                                "Window",
-                                            )
-                                            .changed();
-                                    });
-                                egui::ComboBox::from_id_salt(("opening_wall", index))
-                                    .selected_text(match opening.wall {
-                                        WallSide::Back => "Back wall",
-                                        WallSide::Left => "Left wall",
-                                        WallSide::Right => "Right wall",
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        for (wall, label) in [
-                                            (WallSide::Back, "Back wall"),
-                                            (WallSide::Left, "Left wall"),
-                                            (WallSide::Right, "Right wall"),
-                                        ] {
-                                            openings_changed |= ui
-                                                .selectable_value(&mut opening.wall, wall, label)
-                                                .changed();
-                                        }
-                                    });
-                                if ui.button("Remove").clicked() {
-                                    remove = Some(index);
-                                }
-                            });
-                            openings_changed |=
-                                mm_row(ui, "Position", &mut opening.offset_mm, 0.0..=30000.0);
-                            openings_changed |=
-                                mm_row(ui, "Width", &mut opening.width_mm, 100.0..=10000.0);
-                            openings_changed |=
-                                mm_row(ui, "Height", &mut opening.height_mm, 100.0..=6000.0);
-                            if opening.kind == OpeningKind::Window {
-                                openings_changed |=
-                                    mm_row(ui, "Sill height", &mut opening.sill_mm, 0.0..=5000.0);
-                            } else {
-                                opening.sill_mm = 0.0;
+                    ui.checkbox(&mut room.edit_enabled, "Enable room editing");
+                    ui.checkbox(&mut room.show_measurements, "Show room measurements");
+                    ui.add_enabled_ui(room.show_walls, |ui| {
+                        for side in WallSide::ALL {
+                            let mut visible = room.walls.visible(side);
+                            if ui.checkbox(&mut visible, side.label()).changed() {
+                                room.walls.set(side, visible);
+                                room.dirty = true;
                             }
-                        });
-                    }
-                    room.dirty |= openings_changed;
-                    if let Some(index) = remove {
-                        room.openings.remove(index);
-                        room.dirty = true;
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button("Add door").clicked() {
-                            room.openings.push(Opening::door());
-                            room.dirty = true;
-                        }
-                        if ui.button("Add window").clicked() {
-                            room.openings.push(Opening::window());
-                            room.dirty = true;
                         }
                     });
-                    if room.dirty {
-                        sanitize_openings(
-                            room.width_mm,
-                            room.depth_mm,
-                            room.wall_height_mm,
-                            &mut room.openings,
-                        );
-                    }
+                    ui.weak("Hide a wall to look through that side.");
+                    ui.add_enabled_ui(room.edit_enabled, |ui| {
+                        let mut width = room.width_mm;
+                        let mut depth = room.depth_mm;
+                        let mut height = room.wall_height_mm;
+                        if mm_row(ui, "Width", &mut width, 500.0..=30000.0)
+                            | mm_row(ui, "Depth", &mut depth, 500.0..=30000.0)
+                            | mm_row(ui, "Wall height", &mut height, 500.0..=6000.0)
+                        {
+                            room.width_mm = width;
+                            room.depth_mm = depth;
+                            room.wall_height_mm = height;
+                            room.dirty = true;
+                        }
+                        ui.separator();
+                        ui.strong("Doors & windows");
+                        let mut remove = None;
+                        let mut openings_changed = false;
+                        for (index, opening) in room.openings.iter_mut().enumerate() {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    egui::ComboBox::from_id_salt(("opening_kind", index))
+                                        .selected_text(match opening.kind {
+                                            OpeningKind::Door => "Door",
+                                            OpeningKind::Window => "Window",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            openings_changed |= ui
+                                                .selectable_value(
+                                                    &mut opening.kind,
+                                                    OpeningKind::Door,
+                                                    "Door",
+                                                )
+                                                .changed();
+                                            openings_changed |= ui
+                                                .selectable_value(
+                                                    &mut opening.kind,
+                                                    OpeningKind::Window,
+                                                    "Window",
+                                                )
+                                                .changed();
+                                        });
+                                    egui::ComboBox::from_id_salt(("opening_wall", index))
+                                        .selected_text(opening.wall.label())
+                                        .show_ui(ui, |ui| {
+                                            for wall in WallSide::ALL {
+                                                openings_changed |= ui
+                                                    .selectable_value(
+                                                        &mut opening.wall,
+                                                        wall,
+                                                        wall.label(),
+                                                    )
+                                                    .changed();
+                                            }
+                                        });
+                                    if ui.button("Remove").clicked() {
+                                        remove = Some(index);
+                                    }
+                                });
+                                openings_changed |=
+                                    mm_row(ui, "Position", &mut opening.offset_mm, 0.0..=30000.0);
+                                openings_changed |=
+                                    mm_row(ui, "Width", &mut opening.width_mm, 100.0..=10000.0);
+                                openings_changed |=
+                                    mm_row(ui, "Height", &mut opening.height_mm, 100.0..=6000.0);
+                                if opening.kind == OpeningKind::Window {
+                                    openings_changed |= mm_row(
+                                        ui,
+                                        "Sill height",
+                                        &mut opening.sill_mm,
+                                        0.0..=5000.0,
+                                    );
+                                } else {
+                                    opening.sill_mm = 0.0;
+                                }
+                            });
+                        }
+                        room.dirty |= openings_changed;
+                        if let Some(index) = remove {
+                            room.openings.remove(index);
+                            room.dirty = true;
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("Add door").clicked() {
+                                room.openings.push(Opening::door());
+                                room.dirty = true;
+                            }
+                            if ui.button("Add window").clicked() {
+                                room.openings.push(Opening::window());
+                                room.dirty = true;
+                            }
+                        });
+                        if room.dirty {
+                            sanitize_openings(
+                                room.width_mm,
+                                room.depth_mm,
+                                room.wall_height_mm,
+                                &mut room.openings,
+                            );
+                        }
+                        ui.separator();
+                        ui.strong("Utility pipes");
+                        ui.weak("Drag pipes like cabinets while room editing is on.");
+                        let existing = pieces.iter().len();
+                        ui.horizontal(|ui| {
+                            for (label, horizontal) in
+                                [("Add vertical pipe", false), ("Add horizontal pipe", true)]
+                            {
+                                if ui.button(label).clicked() {
+                                    let kind = Kind::Pipe {
+                                        horizontal,
+                                        count: 1,
+                                        color: PipeColor::Gray,
+                                    };
+                                    let entity = add_piece(
+                                        &mut commands,
+                                        &room,
+                                        kind,
+                                        Placement::Floor,
+                                        existing,
+                                    );
+                                    selection.set_only(entity);
+                                }
+                            }
+                        });
+                    });
                 });
 
                 dropdown(ui, "Add Furniture", false, |ui| {
@@ -742,7 +791,7 @@ pub fn sidebar(
                 });
 
                 dropdown(ui, "In the room", false, |ui| {
-                    let rows: Vec<(Entity, String)> = pieces
+                    let rows: Vec<(Entity, String, bool)> = pieces
                         .iter()
                         .map(|(entity, furniture, _)| {
                             (
@@ -754,15 +803,20 @@ pub fn sidebar(
                                     furniture.height_mm,
                                     furniture.depth_mm
                                 ),
+                                furniture.kind.is_pipe(),
                             )
                         })
                         .collect();
                     if rows.is_empty() {
                         ui.label("Nothing yet.");
                     }
-                    for (entity, label) in &rows {
+                    for (entity, label, is_pipe) in &rows {
                         let selected = selection.contains(*entity);
-                        if ui.selectable_label(selected, label).clicked() {
+                        let row = ui.add_enabled(
+                            room.edit_enabled || !is_pipe,
+                            egui::Button::selectable(selected, label),
+                        );
+                        if row.clicked() {
                             selection.set_only(*entity);
                         }
                     }
@@ -993,6 +1047,13 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 egui::pos2(rect.right(), rect.top() + 6.0),
             );
         }
+        Kind::Pipe { horizontal, .. } => {
+            if horizontal {
+                line(rect.left_center(), rect.right_center());
+            } else {
+                line(rect.center_top(), rect.center_bottom());
+            }
+        }
         Kind::ElectricOven | Kind::Microwave | Kind::CoffeeMachine => {
             painter.rect_stroke(
                 rect.shrink(5.0),
@@ -1137,8 +1198,50 @@ fn add_piece(
     // Step new pieces sideways so a second cabinet does not hide inside the first.
     let column = (already_there % 4) as f32;
     let x_mm = room.width_mm * 0.5 + (column - 1.5) * 180.0;
-    let z_mm = room.depth_mm * 0.55;
+    let z_mm = if kind.is_pipe() {
+        furniture.depth_mm * 0.5 + 10.0
+    } else {
+        room.depth_mm * 0.55
+    };
     commands.spawn((furniture, place(x_mm, y_mm, z_mm, 0))).id()
+}
+
+fn draw_pipe_size(ui: &mut egui::Ui, furniture: &mut Furniture) {
+    let Kind::Pipe {
+        horizontal, count, ..
+    } = furniture.kind
+    else {
+        return;
+    };
+    let mut length = if horizontal {
+        furniture.width_mm
+    } else {
+        furniture.height_mm
+    };
+    let mut diameter = furniture.depth_mm;
+    if mm_row(ui, "Length", &mut length, 100.0..=10000.0) {
+        if horizontal {
+            furniture.width_mm = length;
+        } else {
+            furniture.height_mm = length;
+        }
+        furniture.dirty = true;
+    }
+    if mm_row(ui, "Diameter", &mut diameter, 8.0..=200.0) {
+        furniture.depth_mm = diameter;
+        if count < 2 {
+            if horizontal {
+                furniture.height_mm = diameter;
+            } else {
+                furniture.width_mm = diameter;
+            }
+        } else if horizontal {
+            furniture.height_mm = furniture.height_mm.max(diameter + PIPE_PAIR_GAP_MM);
+        } else {
+            furniture.width_mm = furniture.width_mm.max(diameter + PIPE_PAIR_GAP_MM);
+        }
+        furniture.dirty = true;
+    }
 }
 
 fn draw_properties(
@@ -1157,20 +1260,24 @@ fn draw_properties(
         ui.text_edit_singleline(&mut furniture.name);
     });
 
-    let mut width = furniture.width_mm;
-    let mut height = furniture.height_mm;
-    let mut depth = furniture.depth_mm;
-    if mm_row(ui, "Width", &mut width, 50.0..=6000.0) {
-        furniture.width_mm = width;
-        furniture.dirty = true;
-    }
-    if mm_row(ui, "Height", &mut height, 50.0..=4000.0) {
-        furniture.height_mm = height;
-        furniture.dirty = true;
-    }
-    if mm_row(ui, "Depth", &mut depth, 50.0..=3000.0) {
-        furniture.depth_mm = depth;
-        furniture.dirty = true;
+    if furniture.kind.is_pipe() {
+        draw_pipe_size(ui, &mut furniture);
+    } else {
+        let mut width = furniture.width_mm;
+        let mut height = furniture.height_mm;
+        let mut depth = furniture.depth_mm;
+        if mm_row(ui, "Width", &mut width, 50.0..=6000.0) {
+            furniture.width_mm = width;
+            furniture.dirty = true;
+        }
+        if mm_row(ui, "Height", &mut height, 50.0..=4000.0) {
+            furniture.height_mm = height;
+            furniture.dirty = true;
+        }
+        if mm_row(ui, "Depth", &mut depth, 50.0..=3000.0) {
+            furniture.depth_mm = depth;
+            furniture.dirty = true;
+        }
     }
 
     match furniture.kind {
@@ -1237,6 +1344,68 @@ fn draw_properties(
         | Kind::Microwave => {
             ui.label("Stylized appliance model with editable overall dimensions.");
         }
+        Kind::Pipe {
+            horizontal,
+            count,
+            color,
+        } => {
+            let mut next = (horizontal, count, color);
+            ui.horizontal(|ui| {
+                if ui.selectable_label(!horizontal, "Vertical").clicked() {
+                    next.0 = false;
+                }
+                if ui.selectable_label(horizontal, "Horizontal").clicked() {
+                    next.0 = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.selectable_label(count < 2, "1 pipe").clicked() {
+                    next.1 = 1;
+                }
+                if ui.selectable_label(count >= 2, "2 pipes").clicked() {
+                    next.1 = 2;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Color");
+                for option in PipeColor::ALL {
+                    if ui
+                        .selectable_label(color == option, option.label())
+                        .clicked()
+                    {
+                        next.2 = option;
+                    }
+                }
+            });
+            if next != (horizontal, count, color) {
+                if next.0 != horizontal {
+                    let width = furniture.width_mm;
+                    furniture.width_mm = furniture.height_mm;
+                    furniture.height_mm = width;
+                }
+                if next.1 != count {
+                    let span = if next.1 >= 2 {
+                        furniture.depth_mm + PIPE_PAIR_GAP_MM
+                    } else {
+                        furniture.depth_mm
+                    };
+                    if next.0 {
+                        furniture.height_mm = span;
+                    } else {
+                        furniture.width_mm = span;
+                    }
+                }
+                furniture.kind = Kind::Pipe {
+                    horizontal: next.0,
+                    count: next.1,
+                    color: next.2,
+                };
+                if furniture.name.ends_with("Pipe") {
+                    furniture.name = furniture.label().to_owned();
+                }
+                furniture.dirty = true;
+            }
+        }
     }
 
     if furniture.kind.is_cabinet() {
@@ -1297,85 +1466,87 @@ fn draw_properties(
         }
     });
 
-    egui::CollapsingHeader::new(
-        egui::RichText::new("Materials & colors")
-            .strong()
-            .size(15.0)
-            .color(egui::Color32::BLACK),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
-        if furniture.kind.is_cabinet() {
-            let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
-            for (index, label) in wall_names.into_iter().enumerate() {
+    if !furniture.kind.is_pipe() {
+        egui::CollapsingHeader::new(
+            egui::RichText::new("Materials & colors")
+                .strong()
+                .size(15.0)
+                .color(egui::Color32::BLACK),
+        )
+        .default_open(true)
+        .show(ui, |ui| {
+            if furniture.kind.is_cabinet() {
+                let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
+                for (index, label) in wall_names.into_iter().enumerate() {
+                    if finish_row(
+                        ui,
+                        (entity, "wall", index),
+                        label,
+                        &mut furniture.finishes.carcass[index],
+                    ) {
+                        furniture.dirty = true;
+                    }
+                }
+                for index in 0..furniture.finishes.fronts.len() {
+                    if finish_row(
+                        ui,
+                        (entity, "front", index),
+                        &format!("Front {}", index + 1),
+                        &mut furniture.finishes.fronts[index],
+                    ) {
+                        furniture.dirty = true;
+                    }
+                }
                 if finish_row(
                     ui,
-                    (entity, "wall", index),
-                    label,
-                    &mut furniture.finishes.carcass[index],
+                    (entity, "handle", 0),
+                    "Handles",
+                    &mut furniture.finishes.handles,
                 ) {
                     furniture.dirty = true;
                 }
             }
-            for index in 0..furniture.finishes.fronts.len() {
+            if matches!(furniture.kind, Kind::Table)
+                && finish_row(
+                    ui,
+                    (entity, "frame", 0),
+                    if furniture.kind == Kind::Table {
+                        "Frame / legs"
+                    } else {
+                        "Block"
+                    },
+                    &mut furniture.finishes.carcass[0],
+                )
+            {
+                furniture.dirty = true;
+            }
+            if matches!(
+                furniture.kind,
+                Kind::Table | Kind::Countertop | Kind::Tabletop
+            ) && finish_row(ui, (entity, "top", 0), "Top", &mut furniture.finishes.top)
+            {
+                furniture.dirty = true;
+            }
+            if furniture.kind.is_appliance() {
                 if finish_row(
                     ui,
-                    (entity, "front", index),
-                    &format!("Front {}", index + 1),
-                    &mut furniture.finishes.fronts[index],
+                    (entity, "appliance", 0),
+                    "Appliance body",
+                    &mut furniture.finishes.appliance,
+                ) {
+                    furniture.dirty = true;
+                }
+                if finish_row(
+                    ui,
+                    (entity, "handle", 1),
+                    "Handles",
+                    &mut furniture.finishes.handles,
                 ) {
                     furniture.dirty = true;
                 }
             }
-            if finish_row(
-                ui,
-                (entity, "handle", 0),
-                "Handles",
-                &mut furniture.finishes.handles,
-            ) {
-                furniture.dirty = true;
-            }
-        }
-        if matches!(furniture.kind, Kind::Table)
-            && finish_row(
-                ui,
-                (entity, "frame", 0),
-                if furniture.kind == Kind::Table {
-                    "Frame / legs"
-                } else {
-                    "Block"
-                },
-                &mut furniture.finishes.carcass[0],
-            )
-        {
-            furniture.dirty = true;
-        }
-        if matches!(
-            furniture.kind,
-            Kind::Table | Kind::Countertop | Kind::Tabletop
-        ) && finish_row(ui, (entity, "top", 0), "Top", &mut furniture.finishes.top)
-        {
-            furniture.dirty = true;
-        }
-        if furniture.kind.is_appliance() {
-            if finish_row(
-                ui,
-                (entity, "appliance", 0),
-                "Appliance body",
-                &mut furniture.finishes.appliance,
-            ) {
-                furniture.dirty = true;
-            }
-            if finish_row(
-                ui,
-                (entity, "handle", 1),
-                "Handles",
-                &mut furniture.finishes.handles,
-            ) {
-                furniture.dirty = true;
-            }
-        }
-    });
+        });
+    }
 
     let mut duplicate = None;
     let mut delete = false;
@@ -1452,9 +1623,12 @@ fn finish_name(preset: FinishPreset) -> &'static str {
     }
 }
 
-fn despawn_all(commands: &mut Commands, rows: &[(Entity, String)]) {
-    for (entity, _) in rows {
-        commands.entity(*entity).despawn();
+/// Pipes belong to the room, so clearing the furniture leaves them in place.
+fn despawn_all(commands: &mut Commands, rows: &[(Entity, String, bool)]) {
+    for (entity, _, is_pipe) in rows {
+        if !is_pipe {
+            commands.entity(*entity).despawn();
+        }
     }
 }
 
@@ -1648,10 +1822,14 @@ fn pick_piece(
     origin: Vec3,
     direction: Vec3,
     pieces: &Query<(Entity, &Furniture, &mut Transform, &GlobalTransform)>,
+    allow_pipes: bool,
 ) -> Option<(Entity, Transform)> {
     let mut best_distance = f32::MAX;
     let mut best: Option<(Entity, Transform)> = None;
     for (entity, furniture, transform, global) in pieces.iter() {
+        if furniture.kind.is_pipe() && !allow_pipes {
+            continue;
+        }
         let (min, max) = pick_bounds(furniture);
         let inverse = global.affine().inverse();
         let local_origin = inverse.transform_point3(origin);

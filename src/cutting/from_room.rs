@@ -60,7 +60,8 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
         | Kind::Dishwasher
         | Kind::ElectricOven
         | Kind::CoffeeMachine
-        | Kind::Microwave => Vec::new(),
+        | Kind::Microwave
+        | Kind::Pipe { .. } => Vec::new(),
     }
 }
 

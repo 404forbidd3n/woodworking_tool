@@ -94,6 +94,8 @@ mod tests {
                 depth_mm: 3000.0,
                 wall_height_mm: 2400.0,
                 show_walls: true,
+                walls: None,
+                edit_enabled: false,
                 openings: Vec::new(),
             },
             pieces: Vec::new(),

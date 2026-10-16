@@ -184,19 +184,34 @@ Properties exposes:
 
 ## 8. Room
 
-The default room is 4200 × 3000 × 2400 mm. It has a floor, back wall, left
-wall, and right wall. The front stays open for camera access.
+The default room is 4200 × 3000 × 2400 mm. It has a floor and four walls:
+back, left, right, and front. The front wall starts hidden so the camera can
+still see into the room.
 
-Editable room fields are:
+The Room section starts with these checkboxes, one after another:
 
-- width;
-- depth;
-- wall height;
-- wall visibility.
+- **Show walls** — hides or shows every wall at once;
+- **Enable room editing**;
+- **Show room measurements**;
+- **Back wall**, **Left wall**, **Right wall**, and **Front wall**.
+
+The four wall checkboxes show or hide that wall on its own. Hide the wall you
+are looking through when furniture sits on every side. They stay available
+while the room is locked, and each wall's visibility is saved. While **Show
+walls** is off, the four wall checkboxes are disabled and no wall is drawn.
+
+Room editing is locked by default. **Enable room editing** must be checked
+before wall dimensions, openings, or utility pipes can be changed, added,
+selected, or dragged. This avoids accidental room changes while furniture is
+being arranged.
+
+**Show room measurements** toggles the wall, door, and window dimension lines.
+It is off by default, is not saved in the project, and works whether the room
+is locked or not. A hidden wall does not draw its measurements.
 
 ### 8.1 Doors and windows
 
-Any number of openings can be added to the back, left, or right wall.
+Any number of openings can be added to the back, left, right, or front wall.
 
 Each opening stores:
 
@@ -211,6 +226,30 @@ Doors always begin at floor level. Walls are divided into solid panels around
 the opening, creating a real hole. Out-of-range values are clamped to the room;
 overlapping openings form the union of their holes.
 
+### 8.2 Utility pipes
+
+Pipes only mark obstacles in the space, so they are kept simple. The Room
+section offers **Add vertical pipe** and **Add horizontal pipe**; a new pipe is
+placed against the back wall.
+
+Pipes are pieces like furniture: while room editing is enabled they can be
+clicked, dragged (Shift-drag to raise or lower), rotated with R, duplicated
+with D, deleted, undone, and edited in Properties. While room editing is locked
+they cannot be selected or moved, and Clear / Example kitchen leave them in
+place.
+
+Properties for a pipe:
+
+- vertical or horizontal;
+- one pipe or two parallel pipes;
+- color: gray (default), black, or blue;
+- length;
+- diameter, from 8 mm to 200 mm.
+
+Defaults are 1000 mm long and 20 mm in diameter. A pair is 100 mm across.
+Vertical pipes start on the floor; horizontal pipes start 500 mm up. Pipes
+render as round members and are excluded from sheet stock.
+
 ## 9. Visual guides
 
 - The floor grid uses 100 mm spacing in normal rooms and 500 mm spacing in very
@@ -220,6 +259,9 @@ overlapping openings form the union of their holes.
   black width annotation beneath its front edge.
 - Width annotations include a left-to-right dimension line, arrowheads, and a
   bold `NNN mm` label.
+- When **Show room measurements** is on, each visible wall displays its full
+  width above the wall, and every door and window on a visible wall displays
+  both width and height dimension lines.
 - Selected pieces receive a wire outline; the primary selection is distinct
   from secondary selected pieces.
 
@@ -229,10 +271,11 @@ Projects are human-readable JSON files. The active schema version is 3.
 
 A project stores:
 
-- room dimensions, wall visibility, and openings;
+- room dimensions, the wall master switch, each wall's visibility, the edit
+  lock, and openings;
 - snap settings;
-- furniture kind, name, dimensions, position, facing, placement, legs, and
-  finishes;
+- furniture and pipe kind, name, dimensions, position, facing, placement, legs,
+  and finishes (a pipe's orientation, count, and color are part of its kind);
 - cut-planner board settings, draft values, and parts.
 
 The application reads versions 1, 2, and 3.
@@ -244,11 +287,17 @@ Migration rules:
 - legacy lift-up cabinets become wall-mounted;
 - other legacy cabinets become floor cabinets with plastic 100 mm legs;
 - missing room openings become an empty list;
+- a room saved before per-wall flags keeps its back, left, and right walls,
+  with the front wall hidden;
 - missing cut-list data receives a 2440 × 1220 × 18 mm sheet.
 
 Relative paths resolve inside the project directory. Native dialogs may select
 files elsewhere. Load and Save As open those dialogs without stopping the
 window. Save As appends `.json` when no extension is supplied.
+
+Project files are personal work, not source code. `.gitignore` excludes every
+`*.json` file, so saved projects stay on the local machine and are never
+committed or pushed.
 
 ## 11. Cut planner
 
@@ -279,7 +328,7 @@ Each part has:
 - quantity.
 
 Parts can be entered manually or imported from furniture in the room.
-Appliances and adjustable cabinet legs are excluded from sheet stock.
+Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
 
 ### 11.3 Estimate and canvas
 
@@ -305,7 +354,8 @@ with names and dimensions where space permits.
 - `src/layout/edit.rs` — input, toolbar, sidebar, Properties, and editor
   actions.
 - `src/layout/history.rs` — bounded layout undo/redo.
-- `src/layout/dimensions.rs` — projected cabinet width annotations.
+- `src/layout/dimensions.rs` — projected cabinet width and optional room
+  measurement annotations.
 - `src/layout/project.rs` — native project file selection.
 - `src/cutting/job.rs` — supplied board and part-list state.
 - `src/cutting/pack.rs` — packing and board estimation.
@@ -325,9 +375,15 @@ A release is acceptable when:
 - all unit tests pass;
 - v1, v2, and v3 projects load safely;
 - the main window and cut-planner window open without panic or Egui pass errors;
-- save, Save As, and Load preserve room, furniture, materials, openings, and
-  cut-list data;
+- save, Save As, and Load preserve room, furniture, materials, openings,
+  utility pipes, and cut-list data;
 - undo/redo restore complete layout edits;
 - floor and wall catalogs create their documented defaults;
 - room openings produce visible wall holes;
+- each of the four walls can be shown or hidden on its own;
+- a new pipe is 20 mm in diameter and its diameter can be edited;
+- wall, door, and window measurements are hidden by default and remain
+  readable while orbiting when shown;
+- pipes drag like furniture while room editing is on;
+- the room edit lock prevents accidental opening, pipe, and wall changes;
 - sheet estimates respect quantity, rotation, trim, and kerf.

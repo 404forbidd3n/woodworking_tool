@@ -62,6 +62,7 @@ impl Palette {
             Surface::Top => self.table.clone(),
             Surface::Appliance(_) => self.placeholder.clone(),
             Surface::Leg(_) => self.handle.clone(),
+            Surface::Pipe => self.handle.clone(),
             Surface::Floor => self.floor.clone(),
             Surface::Wall => self.wall.clone(),
         }
@@ -248,6 +249,8 @@ pub(crate) fn apply_saved_room(room: &mut Room, saved: &RoomFile) {
     room.depth_mm = saved.depth_mm;
     room.wall_height_mm = saved.wall_height_mm;
     room.show_walls = saved.show_walls;
+    room.walls = saved.resolved_walls();
+    room.edit_enabled = saved.edit_enabled;
     room.openings = saved.openings.clone();
     room.dirty = true;
 }
@@ -337,10 +340,10 @@ fn room_solids(room: &Room) -> Vec<Solid> {
         rotation: Quat::IDENTITY,
         role: Surface::Floor,
     }];
-    if room.show_walls {
-        parts.extend(wall_panels(room, crate::layout::model::WallSide::Back, t));
-        parts.extend(wall_panels(room, crate::layout::model::WallSide::Left, t));
-        parts.extend(wall_panels(room, crate::layout::model::WallSide::Right, t));
+    for side in crate::layout::model::WallSide::ALL {
+        if room.wall_shown(side) {
+            parts.extend(wall_panels(room, side, t));
+        }
     }
     parts
 }
@@ -348,7 +351,7 @@ fn room_solids(room: &Room) -> Vec<Solid> {
 fn wall_panels(room: &Room, side: crate::layout::model::WallSide, thickness: f32) -> Vec<Solid> {
     use crate::layout::model::WallSide;
     let length_mm = match side {
-        WallSide::Back => room.width_mm,
+        WallSide::Back | WallSide::Front => room.width_mm,
         WallSide::Left | WallSide::Right => room.depth_mm,
     };
     let mut xs = vec![0.0, length_mm];
@@ -398,6 +401,10 @@ fn wall_panels(room: &Room, side: crate::layout::model::WallSide, thickness: f32
                     Vec3::new(thickness, panel_h, span),
                     Vec3::new(mm_to_m(room.width_mm) + thickness * 0.5, center_y, along),
                 ),
+                WallSide::Front => wall(
+                    Vec3::new(span, panel_h, thickness),
+                    Vec3::new(along, center_y, mm_to_m(room.depth_mm) + thickness * 0.5),
+                ),
             };
             panels.push(solid);
         }
@@ -426,14 +433,45 @@ fn replace_children(
 ) {
     let built: Vec<Built> = parts
         .into_iter()
-        .map(|part| Built {
-            mesh: meshes.add(Cuboid::new(part.size.x, part.size.y, part.size.z)),
-            material: surface_material(materials, material_cache, palette, furniture, part.role),
-            transform: Transform {
-                translation: part.translation,
-                rotation: part.rotation,
-                scale: Vec3::ONE,
-            },
+        .map(|part| {
+            let (mesh, rotation) = if part.role == Surface::Pipe {
+                if part.size.y >= part.size.x && part.size.y >= part.size.z {
+                    (
+                        meshes.add(Cylinder::new(part.size.x * 0.5, part.size.y)),
+                        part.rotation,
+                    )
+                } else if part.size.x >= part.size.z {
+                    (
+                        meshes.add(Cylinder::new(part.size.y * 0.5, part.size.x)),
+                        part.rotation * Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                    )
+                } else {
+                    (
+                        meshes.add(Cylinder::new(part.size.x * 0.5, part.size.z)),
+                        part.rotation * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                    )
+                }
+            } else {
+                (
+                    meshes.add(Cuboid::new(part.size.x, part.size.y, part.size.z)),
+                    part.rotation,
+                )
+            };
+            Built {
+                mesh,
+                material: surface_material(
+                    materials,
+                    material_cache,
+                    palette,
+                    furniture,
+                    part.role,
+                ),
+                transform: Transform {
+                    translation: part.translation,
+                    rotation,
+                    scale: Vec3::ONE,
+                },
+            }
         })
         .collect();
 
@@ -482,6 +520,12 @@ fn surface_material(
             Finish::new(FinishPreset::StainlessSteel, [165, 172, 175])
         }
         Surface::Leg(_) => Finish::new(FinishPreset::Charcoal, [48, 50, 52]),
+        Surface::Pipe => match furniture.kind {
+            crate::layout::model::Kind::Pipe { color, .. } => {
+                Finish::new(FinishPreset::Custom, color.rgb())
+            }
+            _ => return palette.handle(role),
+        },
         Surface::Floor | Surface::Wall => return palette.handle(role),
     };
     cache.get(materials, finish)
@@ -603,6 +647,8 @@ pub fn saved_room(room: &Room) -> RoomFile {
         depth_mm: room.depth_mm,
         wall_height_mm: room.wall_height_mm,
         show_walls: room.show_walls,
+        walls: Some(room.walls),
+        edit_enabled: room.edit_enabled,
         openings: room.openings.clone(),
     }
 }
@@ -642,6 +688,17 @@ mod tests {
         });
         let panels = wall_panels(&room, WallSide::Back, 0.08);
         assert!(panels.len() > 1);
+        room.walls.front = true;
+        let front = wall_panels(&room, WallSide::Front, 0.08);
+        let depth = mm_to_m(room.depth_mm);
+        assert!(!front.is_empty());
+        assert!(front.iter().all(|panel| panel.translation.z > depth));
+        room.walls.back = false;
+        let drawn = room_solids(&room);
+        assert!(drawn
+            .iter()
+            .filter(|solid| solid.role == Surface::Wall)
+            .all(|panel| panel.translation.z > -0.01));
         assert!(panels.iter().all(|panel| {
             let x = panel.translation.x;
             let y = panel.translation.y;

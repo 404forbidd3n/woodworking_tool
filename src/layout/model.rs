@@ -77,6 +77,44 @@ pub enum Kind {
     ElectricOven,
     CoffeeMachine,
     Microwave,
+    /// A utility pipe, or a pair of them, that pieces must work around.
+    Pipe {
+        #[serde(default)]
+        horizontal: bool,
+        #[serde(default = "default_pipe_count")]
+        count: u8,
+        #[serde(default)]
+        color: PipeColor,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipeColor {
+    #[default]
+    Gray,
+    Black,
+    Blue,
+}
+
+impl PipeColor {
+    pub const ALL: [Self; 3] = [Self::Gray, Self::Black, Self::Blue];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gray => "Gray",
+            Self::Black => "Black",
+            Self::Blue => "Blue",
+        }
+    }
+
+    pub fn rgb(self) -> [u8; 3] {
+        match self {
+            Self::Gray => [150, 154, 158],
+            Self::Black => [32, 33, 35],
+            Self::Blue => [46, 104, 178],
+        }
+    }
 }
 
 impl Kind {
@@ -105,7 +143,21 @@ impl Kind {
             Kind::ElectricOven => "Electric Oven",
             Kind::CoffeeMachine => "Coffee Machine",
             Kind::Microwave => "Microwave",
+            Kind::Pipe {
+                horizontal: false,
+                count: 1,
+                ..
+            } => "Vertical Pipe",
+            Kind::Pipe {
+                horizontal: false, ..
+            } => "Double Vertical Pipe",
+            Kind::Pipe { count: 1, .. } => "Horizontal Pipe",
+            Kind::Pipe { .. } => "Double Horizontal Pipe",
         }
+    }
+
+    pub fn is_pipe(self) -> bool {
+        matches!(self, Kind::Pipe { .. })
     }
 
     pub fn front_count(self) -> usize {
@@ -162,6 +214,20 @@ impl Kind {
             Kind::ElectricOven => (600.0, 600.0, 570.0, 720.0),
             Kind::CoffeeMachine => (260.0, 350.0, 420.0, 900.0),
             Kind::Microwave => (520.0, 310.0, 400.0, 1200.0),
+            Kind::Pipe {
+                horizontal, count, ..
+            } => {
+                let span = if count >= 2 {
+                    PIPE_DIAMETER_MM + PIPE_PAIR_GAP_MM
+                } else {
+                    PIPE_DIAMETER_MM
+                };
+                if horizontal {
+                    (1000.0, span, PIPE_DIAMETER_MM, 500.0)
+                } else {
+                    (span, 1000.0, PIPE_DIAMETER_MM, 0.0)
+                }
+            }
         };
         let mut furniture = Furniture::new(self, width, height, depth);
         furniture.placement = placement;
@@ -178,6 +244,15 @@ impl Kind {
 const fn default_shelf_count() -> u8 {
     3
 }
+
+const fn default_pipe_count() -> u8 {
+    1
+}
+
+/// Default pipe thickness. Depth on a pipe piece is this diameter.
+pub const PIPE_DIAMETER_MM: f32 = 20.0;
+/// Extra width or height between the outer faces of a pair of pipes.
+pub const PIPE_PAIR_GAP_MM: f32 = 80.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -350,10 +425,12 @@ impl Furniture {
     }
 
     pub fn size_meters(&self) -> Vec3 {
+        // Pipes are much thinner than a cabinet panel, so they keep a smaller floor.
+        let minimum = if self.kind.is_pipe() { 0.008 } else { 0.05 };
         Vec3::new(
-            mm_to_m(self.width_mm).max(0.05),
-            mm_to_m(self.height_mm).max(0.05),
-            mm_to_m(self.depth_mm).max(0.05),
+            mm_to_m(self.width_mm).max(minimum),
+            mm_to_m(self.height_mm).max(minimum),
+            mm_to_m(self.depth_mm).max(minimum),
         )
     }
 
@@ -370,14 +447,20 @@ impl Furniture {
     }
 }
 
-/// Floor rectangle and the three walls around it. The open side is +Z,
-/// which is where the camera starts, so a kitchen can be seen from the front.
+/// Floor rectangle and four walls. Each wall can be hidden so the camera can
+/// look through that side.
 #[derive(Resource, Clone, Debug)]
 pub struct Room {
     pub width_mm: f32,
     pub depth_mm: f32,
     pub wall_height_mm: f32,
+    /// Master switch. Individual walls stay as they were when this is off.
     pub show_walls: bool,
+    pub walls: WallVisibility,
+    /// A safety lock for dimensions, openings, and utility pipes.
+    pub edit_enabled: bool,
+    /// View-only: wall, door, and window dimension lines. Not saved.
+    pub show_measurements: bool,
     pub openings: Vec<Opening>,
     pub dirty: bool,
 }
@@ -389,6 +472,9 @@ impl Default for Room {
             depth_mm: 3000.0,
             wall_height_mm: 2400.0,
             show_walls: true,
+            walls: WallVisibility::default(),
+            edit_enabled: false,
+            show_measurements: false,
             openings: Vec::new(),
             dirty: true,
         }
@@ -408,6 +494,71 @@ pub enum WallSide {
     Back,
     Left,
     Right,
+    Front,
+}
+
+impl WallSide {
+    pub const ALL: [Self; 4] = [Self::Back, Self::Left, Self::Right, Self::Front];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Back => "Back wall",
+            Self::Left => "Left wall",
+            Self::Right => "Right wall",
+            Self::Front => "Front wall",
+        }
+    }
+}
+
+/// Which of the four walls are drawn. The front starts hidden so the room can
+/// still be seen from the camera's starting side.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WallVisibility {
+    pub back: bool,
+    pub left: bool,
+    pub right: bool,
+    pub front: bool,
+}
+
+impl Default for WallVisibility {
+    fn default() -> Self {
+        Self {
+            back: true,
+            left: true,
+            right: true,
+            front: false,
+        }
+    }
+}
+
+impl WallVisibility {
+    pub fn visible(self, side: WallSide) -> bool {
+        match side {
+            WallSide::Back => self.back,
+            WallSide::Left => self.left,
+            WallSide::Right => self.right,
+            WallSide::Front => self.front,
+        }
+    }
+
+    pub fn set(&mut self, side: WallSide, visible: bool) {
+        match side {
+            WallSide::Back => self.back = visible,
+            WallSide::Left => self.left = visible,
+            WallSide::Right => self.right = visible,
+            WallSide::Front => self.front = visible,
+        }
+    }
+
+    /// Rooms saved before the front wall existed.
+    pub fn legacy(show_walls: bool) -> Self {
+        Self {
+            back: show_walls,
+            left: show_walls,
+            right: show_walls,
+            front: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -447,6 +598,10 @@ impl Opening {
 }
 
 impl Room {
+    pub fn wall_shown(&self, side: WallSide) -> bool {
+        self.show_walls && self.walls.visible(side)
+    }
+
     pub fn size_meters(&self) -> Vec3 {
         Vec3::new(
             mm_to_m(self.width_mm).max(0.5),
@@ -549,6 +704,7 @@ pub enum Surface {
     Top,
     Appliance(u8),
     Leg(LegStyle),
+    Pipe,
     Floor,
     Wall,
 }
@@ -596,6 +752,9 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         | Kind::ElectricOven
         | Kind::CoffeeMachine
         | Kind::Microwave) => appliance(size, kind),
+        Kind::Pipe {
+            horizontal, count, ..
+        } => pipes(size, horizontal, count),
         Kind::Drawers { count } => {
             let mut parts = carcass(size);
             parts.extend(drawer_fronts(size, count.max(1)));
@@ -625,6 +784,39 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         parts.extend(adjustable_legs(size, leg_height, furniture.legs));
     }
     parts
+}
+
+/// Pipe diameter is the piece depth. Double pipes sit at the two ends of the
+/// cross-section so the outer box still bounds them.
+fn pipes(size: Vec3, horizontal: bool, count: u8) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    if horizontal {
+        let d = d.min(h);
+        let ys: Vec<f32> = if count >= 2 {
+            vec![d * 0.5, h - d * 0.5]
+        } else {
+            vec![h * 0.5]
+        };
+        ys.into_iter()
+            .map(|y| Solid::axis(Vec3::new(w, d, d), Vec3::new(0.0, y, 0.0), Surface::Pipe))
+            .collect()
+    } else {
+        let d = d.min(w);
+        let xs: Vec<f32> = if count >= 2 {
+            vec![-(w - d) * 0.5, (w - d) * 0.5]
+        } else {
+            vec![0.0]
+        };
+        xs.into_iter()
+            .map(|x| {
+                Solid::axis(
+                    Vec3::new(d, h, d),
+                    Vec3::new(x, h * 0.5, 0.0),
+                    Surface::Pipe,
+                )
+            })
+            .collect()
+    }
 }
 
 fn open_shelves(size: Vec3, count: u8) -> Vec<Solid> {
@@ -948,12 +1140,14 @@ pub fn pick_bounds(furniture: &Furniture) -> (Vec3, Vec3) {
     } else {
         0.0
     };
+    // A 20 mm pipe is hard to grab. The outline and the click target grow a little.
+    let grab = if furniture.kind.is_pipe() { 0.03 } else { 0.0 };
     (
-        Vec3::new(-size.x * 0.5, 0.0, -size.z * 0.5),
+        Vec3::new(-size.x * 0.5 - grab, 0.0, -size.z * 0.5 - grab),
         Vec3::new(
-            size.x * 0.5,
-            size.y + leg_height + extra_y,
-            size.z * 0.5 + extra_z,
+            size.x * 0.5 + grab,
+            size.y + leg_height + extra_y + grab,
+            size.z * 0.5 + extra_z + grab,
         ),
     )
 }
@@ -1149,8 +1343,22 @@ pub struct RoomFile {
     pub depth_mm: f32,
     pub wall_height_mm: f32,
     pub show_walls: bool,
+    /// Missing on older files. Those keep three walls and a hidden front.
+    #[serde(default)]
+    pub walls: Option<WallVisibility>,
+    #[serde(default)]
+    pub edit_enabled: bool,
     #[serde(default)]
     pub openings: Vec<Opening>,
+}
+
+impl RoomFile {
+    /// Older files have no per-wall flags. Those keep the back, left, and
+    /// right walls and leave the front hidden.
+    pub fn resolved_walls(&self) -> WallVisibility {
+        self.walls
+            .unwrap_or_else(|| WallVisibility::legacy(self.show_walls))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1247,7 +1455,7 @@ pub fn sanitize_openings(
 ) {
     for opening in openings {
         let wall_length = match opening.wall {
-            WallSide::Back => room_width_mm,
+            WallSide::Back | WallSide::Front => room_width_mm,
             WallSide::Left | WallSide::Right => room_depth_mm,
         };
         opening.width_mm = finite_or(opening.width_mm, 900.0).clamp(100.0, wall_length.max(100.0));
@@ -1520,5 +1728,56 @@ mod tests {
         assert_eq!(openings[0].width_mm, 3000.0);
         assert_eq!(openings[0].offset_mm, 0.0);
         assert_eq!(openings[0].sill_mm, 400.0);
+    }
+
+    #[test]
+    fn pipes_are_round_pieces_with_one_or_two_members() {
+        let vertical = Kind::Pipe {
+            horizontal: false,
+            count: 2,
+            color: PipeColor::Gray,
+        };
+        let (furniture, y) = vertical.preset(Placement::Floor);
+        assert_eq!(y, 0.0);
+        assert_eq!(furniture.legs, LegStyle::None);
+        let parts = solids(&furniture);
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|part| part.role == Surface::Pipe));
+        assert!(parts.iter().all(|part| part.size.y > part.size.x));
+
+        let horizontal = Kind::Pipe {
+            horizontal: true,
+            count: 1,
+            color: PipeColor::Blue,
+        };
+        let (furniture, y) = horizontal.preset(Placement::Floor);
+        assert_eq!(y, 500.0);
+        let parts = solids(&furniture);
+        assert_eq!(parts.len(), 1);
+        assert!(parts[0].size.x > parts[0].size.y);
+        assert!((parts[0].size.y - 0.02).abs() < 0.001);
+
+        let saved: RoomFile = serde_json::from_str(
+            r#"{
+                "width_mm": 4200.0,
+                "depth_mm": 3000.0,
+                "wall_height_mm": 2400.0,
+                "show_walls": true
+            }"#,
+        )
+        .unwrap();
+        let walls = saved.resolved_walls();
+        assert!(walls.back && walls.left && walls.right);
+        assert!(!walls.front);
+
+        let minimal: Kind = serde_json::from_str(r#"{"type":"pipe"}"#).unwrap();
+        assert_eq!(
+            minimal,
+            Kind::Pipe {
+                horizontal: false,
+                count: 1,
+                color: PipeColor::Gray
+            }
+        );
     }
 }
