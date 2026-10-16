@@ -61,6 +61,7 @@ impl Palette {
             Surface::Handle => self.handle.clone(),
             Surface::Top => self.table.clone(),
             Surface::Appliance(_) => self.placeholder.clone(),
+            Surface::ApplianceRound(_) => self.placeholder.clone(),
             Surface::Leg(_) => self.handle.clone(),
             Surface::Pipe => self.handle.clone(),
             Surface::Floor => self.floor.clone(),
@@ -434,29 +435,39 @@ fn replace_children(
     let built: Vec<Built> = parts
         .into_iter()
         .map(|part| {
-            let (mesh, rotation) = if part.role == Surface::Pipe {
-                if part.size.y >= part.size.x && part.size.y >= part.size.z {
+            let (mesh, rotation) =
+                if matches!(part.role, Surface::Pipe | Surface::ApplianceRound(_)) {
+                    // The two closest axes are the round cross-section, so a
+                    // short disc stays upright instead of turning into a rod.
+                    let (x, y, z) = (part.size.x, part.size.y, part.size.z);
+                    let xz = (x - z).abs();
+                    let yz = (y - z).abs();
+                    let xy = (x - y).abs();
+                    let (radius, length, spin) = if xz <= yz && xz <= xy {
+                        (x.min(z) * 0.5, y, Quat::IDENTITY)
+                    } else if yz <= xz && yz <= xy {
+                        (
+                            y.min(z) * 0.5,
+                            x,
+                            Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                        )
+                    } else {
+                        (
+                            x.min(y) * 0.5,
+                            z,
+                            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                        )
+                    };
                     (
-                        meshes.add(Cylinder::new(part.size.x * 0.5, part.size.y)),
-                        part.rotation,
-                    )
-                } else if part.size.x >= part.size.z {
-                    (
-                        meshes.add(Cylinder::new(part.size.y * 0.5, part.size.x)),
-                        part.rotation * Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                        meshes.add(Cylinder::new(radius.max(0.001), length.max(0.001))),
+                        part.rotation * spin,
                     )
                 } else {
                     (
-                        meshes.add(Cylinder::new(part.size.x * 0.5, part.size.z)),
-                        part.rotation * Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                        meshes.add(Cuboid::new(part.size.x, part.size.y, part.size.z)),
+                        part.rotation,
                     )
-                }
-            } else {
-                (
-                    meshes.add(Cuboid::new(part.size.x, part.size.y, part.size.z)),
-                    part.rotation,
-                )
-            };
+                };
             Built {
                 mesh,
                 material: surface_material(
@@ -514,6 +525,8 @@ fn surface_material(
         Surface::Top => furniture.finishes.top,
         Surface::Appliance(2) => Finish::new(FinishPreset::Charcoal, [28, 32, 34]),
         Surface::Appliance(_) => furniture.finishes.appliance,
+        Surface::ApplianceRound(2) => Finish::new(FinishPreset::Charcoal, [28, 32, 34]),
+        Surface::ApplianceRound(_) => furniture.finishes.appliance,
         Surface::Leg(crate::layout::model::LegStyle::Wood100) => furniture.finishes.carcass[0],
         Surface::Leg(crate::layout::model::LegStyle::Metal100)
         | Surface::Leg(crate::layout::model::LegStyle::Metal150) => {

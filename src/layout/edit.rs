@@ -775,16 +775,33 @@ pub fn sidebar(
 
                 dropdown(ui, "Add Appliances", false, |ui| {
                     let existing = pieces.iter().len();
-                    for (label, kind) in [
-                        ("Refrigerator", Kind::Refrigerator),
-                        ("Dishwasher", Kind::Dishwasher),
-                        ("Electric Oven", Kind::ElectricOven),
-                        ("Coffee Machine", Kind::CoffeeMachine),
-                        ("Microwave", Kind::Microwave),
+                    for (label, kind, placement) in [
+                        ("Refrigerator", Kind::Refrigerator, Placement::Floor),
+                        ("Dishwasher", Kind::Dishwasher, Placement::Floor),
+                        ("Electric Oven", Kind::ElectricOven, Placement::Floor),
+                        ("Coffee Machine", Kind::CoffeeMachine, Placement::Floor),
+                        ("Microwave", Kind::Microwave, Placement::Floor),
+                        ("Square Kitchen Sink", Kind::SquareSink, Placement::Floor),
+                        ("Round Kitchen Sink", Kind::RoundSink, Placement::Floor),
+                        (
+                            "Double-Bowl Kitchen Sink",
+                            Kind::DoubleSink,
+                            Placement::Floor,
+                        ),
+                        (
+                            "Kitchen Faucet / Water Pipe",
+                            Kind::SinkFaucet,
+                            Placement::Floor,
+                        ),
+                        (
+                            "Central Heating Boiler",
+                            Kind::CentralHeatingBoiler,
+                            Placement::Wall,
+                        ),
+                        ("Air Conditioner", Kind::AirConditioner, Placement::Wall),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity =
-                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
+                            let entity = add_piece(&mut commands, &room, kind, placement, existing);
                             selection.set_only(entity);
                         }
                     }
@@ -1060,6 +1077,66 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 egui::CornerRadius::same(1),
                 stroke,
                 egui::StrokeKind::Inside,
+            );
+        }
+        Kind::SquareSink => {
+            painter.rect_stroke(
+                rect.shrink(5.0),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        Kind::RoundSink => {
+            painter.circle_stroke(
+                rect.center(),
+                rect.width().min(rect.height()) * 0.32,
+                stroke,
+            );
+        }
+        Kind::DoubleSink => {
+            let left = egui::Rect::from_min_max(
+                rect.min + egui::vec2(3.0, 5.0),
+                egui::pos2(rect.center().x - 1.0, rect.bottom() - 5.0),
+            );
+            let right = egui::Rect::from_min_max(
+                egui::pos2(rect.center().x + 1.0, rect.top() + 5.0),
+                rect.max - egui::vec2(3.0, 5.0),
+            );
+            painter.rect_stroke(left, 1.0, stroke, egui::StrokeKind::Inside);
+            painter.rect_stroke(right, 1.0, stroke, egui::StrokeKind::Inside);
+        }
+        Kind::SinkFaucet => {
+            line(rect.center_bottom(), rect.center_top());
+            line(
+                rect.center_top(),
+                egui::pos2(rect.right() - 3.0, rect.top()),
+            );
+            line(
+                egui::pos2(rect.right() - 3.0, rect.top()),
+                egui::pos2(rect.right() - 3.0, rect.center().y),
+            );
+        }
+        Kind::CentralHeatingBoiler => {
+            painter.rect_stroke(
+                rect.shrink(4.0),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            line(
+                egui::pos2(rect.left() + 6.0, rect.bottom() - 5.0),
+                egui::pos2(rect.right() - 6.0, rect.bottom() - 5.0),
+            );
+        }
+        Kind::AirConditioner => {
+            line(
+                egui::pos2(rect.left() + 3.0, rect.bottom() - 6.0),
+                egui::pos2(rect.right() - 3.0, rect.bottom() - 6.0),
+            );
+            line(
+                egui::pos2(rect.left() + 5.0, rect.bottom() - 3.0),
+                egui::pos2(rect.right() - 5.0, rect.bottom() - 3.0),
             );
         }
         Kind::Refrigerator => {
@@ -1341,8 +1418,22 @@ fn draw_properties(
         | Kind::Dishwasher
         | Kind::ElectricOven
         | Kind::CoffeeMachine
-        | Kind::Microwave => {
+        | Kind::Microwave
+        | Kind::CentralHeatingBoiler
+        | Kind::AirConditioner => {
             ui.label("Stylized appliance model with editable overall dimensions.");
+        }
+        Kind::SquareSink => {
+            ui.label("Open rectangular basin for washing dishes. The rim sits at worktop height.");
+        }
+        Kind::RoundSink => {
+            ui.label("Open round basin for washing dishes. The rim sits at worktop height.");
+        }
+        Kind::DoubleSink => {
+            ui.label("Large open sink with two rectangular basins.");
+        }
+        Kind::SinkFaucet => {
+            ui.label("Movable water pipe / faucet for a kitchen sink.");
         }
         Kind::Pipe {
             horizontal,
@@ -1528,20 +1619,7 @@ fn draw_properties(
                 furniture.dirty = true;
             }
             if furniture.kind.is_appliance() {
-                if finish_row(
-                    ui,
-                    (entity, "appliance", 0),
-                    "Appliance body",
-                    &mut furniture.finishes.appliance,
-                ) {
-                    furniture.dirty = true;
-                }
-                if finish_row(
-                    ui,
-                    (entity, "handle", 1),
-                    "Handles",
-                    &mut furniture.finishes.handles,
-                ) {
+                if appliance_finish_row(ui, &mut furniture.finishes.appliance) {
                     furniture.dirty = true;
                 }
             }
@@ -1607,6 +1685,28 @@ fn finish_row(
         } else {
             let rgb = finish.rgb();
             ui.colored_label(egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]), "■");
+        }
+    });
+    changed
+}
+
+fn appliance_finish_row(ui: &mut egui::Ui, finish: &mut Finish) -> bool {
+    let choices = [
+        (
+            "Silver metal",
+            Finish::new(FinishPreset::StainlessSteel, [165, 172, 175]),
+        ),
+        ("Black", Finish::new(FinishPreset::Custom, [25, 27, 29])),
+        ("Dark gray", Finish::new(FinishPreset::Custom, [70, 73, 76])),
+    ];
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Appliance color");
+        for (label, option) in choices {
+            if ui.selectable_label(*finish == option, label).clicked() && *finish != option {
+                *finish = option;
+                changed = true;
+            }
         }
     });
     changed

@@ -98,9 +98,24 @@ placed 1400 mm above the floor.
 - Electric oven
 - Coffee machine
 - Microwave
+- Square kitchen sink
+- Round kitchen sink
+- Large double-bowl square kitchen sink
+- Kitchen faucet / water pipe
+- Central heating boiler (`centrală termică`)
+- Air conditioner
 
 Appliances use lightweight built-in geometry and require no external model
-assets.
+assets. Sink rims align with the default worktop height. The faucet is a
+separate movable appliance so it can be positioned with any sink. The central
+heating boiler and air conditioner start wall-mounted.
+
+Each appliance has a more recognizable silhouette: the coffee machine has a
+hopper, drip tray, and twin spouts; the microwave has a wide door, control
+strip, and handle; kitchen sinks are open wash basins with a rim, walls, a
+visible floor, and a drain; the boiler has a control panel and service pipes;
+and the air conditioner has a vent and louvers. Appliance body color is
+limited to silver metal, black, or dark gray.
 
 ## 5. Cabinet construction and appearance
 
@@ -126,8 +141,9 @@ Four legs are positioned under a floor cabinet. Legs are purchased hardware
 and are excluded from plywood cutting estimates.
 
 Finishes can be edited independently for carcass parts, each front, handles,
-tops, and appliance bodies. Presets are oak, walnut, white, charcoal, stainless
-steel, and custom RGB colour.
+and tops. Their presets are oak, walnut, white, charcoal, stainless steel, and
+custom RGB colour. Appliance bodies instead use the focused silver metal,
+black, and dark-gray choices documented above.
 
 ## 6. Selection and editing
 

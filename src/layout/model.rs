@@ -77,6 +77,12 @@ pub enum Kind {
     ElectricOven,
     CoffeeMachine,
     Microwave,
+    SquareSink,
+    RoundSink,
+    DoubleSink,
+    SinkFaucet,
+    CentralHeatingBoiler,
+    AirConditioner,
     /// A utility pipe, or a pair of them, that pieces must work around.
     Pipe {
         #[serde(default)]
@@ -143,6 +149,12 @@ impl Kind {
             Kind::ElectricOven => "Electric Oven",
             Kind::CoffeeMachine => "Coffee Machine",
             Kind::Microwave => "Microwave",
+            Kind::SquareSink => "Square Kitchen Sink",
+            Kind::RoundSink => "Round Kitchen Sink",
+            Kind::DoubleSink => "Double-Bowl Kitchen Sink",
+            Kind::SinkFaucet => "Kitchen Faucet / Water Pipe",
+            Kind::CentralHeatingBoiler => "Central Heating Boiler",
+            Kind::AirConditioner => "Air Conditioner",
             Kind::Pipe {
                 horizontal: false,
                 count: 1,
@@ -178,6 +190,12 @@ impl Kind {
                 | Kind::ElectricOven
                 | Kind::CoffeeMachine
                 | Kind::Microwave
+                | Kind::SquareSink
+                | Kind::RoundSink
+                | Kind::DoubleSink
+                | Kind::SinkFaucet
+                | Kind::CentralHeatingBoiler
+                | Kind::AirConditioner
         )
     }
 
@@ -214,6 +232,13 @@ impl Kind {
             Kind::ElectricOven => (600.0, 600.0, 570.0, 720.0),
             Kind::CoffeeMachine => (260.0, 350.0, 420.0, 900.0),
             Kind::Microwave => (520.0, 310.0, 400.0, 1200.0),
+            // Sink tops align with the 758 mm top of the default worktop.
+            Kind::SquareSink => (500.0, 180.0, 450.0, 578.0),
+            Kind::RoundSink => (450.0, 180.0, 450.0, 578.0),
+            Kind::DoubleSink => (850.0, 200.0, 500.0, 558.0),
+            Kind::SinkFaucet => (220.0, 420.0, 240.0, 758.0),
+            Kind::CentralHeatingBoiler => (500.0, 700.0, 300.0, 1400.0),
+            Kind::AirConditioner => (900.0, 300.0, 230.0, 1900.0),
             Kind::Pipe {
                 horizontal, count, ..
             } => {
@@ -703,6 +728,8 @@ pub enum Surface {
     Handle,
     Top,
     Appliance(u8),
+    /// A round appliance part. Size uses diameter × height × diameter.
+    ApplianceRound(u8),
     Leg(LegStyle),
     Pipe,
     Floor,
@@ -751,7 +778,13 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         | Kind::Dishwasher
         | Kind::ElectricOven
         | Kind::CoffeeMachine
-        | Kind::Microwave) => appliance(size, kind),
+        | Kind::Microwave
+        | Kind::SquareSink
+        | Kind::RoundSink
+        | Kind::DoubleSink
+        | Kind::SinkFaucet
+        | Kind::CentralHeatingBoiler
+        | Kind::AirConditioner) => appliance(size, kind),
         Kind::Pipe {
             horizontal, count, ..
         } => pipes(size, horizontal, count),
@@ -1090,21 +1123,37 @@ fn appliance(size: Vec3, kind: Kind) -> Vec<Solid> {
         Kind::CoffeeMachine => vec![
             body,
             Solid::axis(
-                Vec3::new(w * 0.46, h * 0.38, 0.02),
-                Vec3::new(0.0, h * 0.55, front_z),
+                Vec3::new(w * 0.62, h * 0.48, 0.02),
+                Vec3::new(0.0, h * 0.57, front_z),
                 Surface::Appliance(2),
             ),
             Solid::axis(
-                Vec3::new(w * 0.55, 0.018, d * 0.34),
-                Vec3::new(0.0, h * 0.08, d * 0.28),
+                Vec3::new(w * 0.7, 0.025, d * 0.42),
+                Vec3::new(0.0, h * 0.07, d * 0.25),
+                Surface::Appliance(1),
+            ),
+            // Twin coffee spouts make this silhouette unlike a microwave.
+            Solid::axis(
+                Vec3::new(0.025, h * 0.18, 0.025),
+                Vec3::new(-w * 0.1, h * 0.34, front_z + 0.025),
+                Surface::Handle,
+            ),
+            Solid::axis(
+                Vec3::new(0.025, h * 0.18, 0.025),
+                Vec3::new(w * 0.1, h * 0.34, front_z + 0.025),
+                Surface::Handle,
+            ),
+            Solid::axis(
+                Vec3::new(w * 0.48, h * 0.12, d * 0.5),
+                Vec3::new(0.0, h * 0.94, -d * 0.08),
                 Surface::Appliance(1),
             ),
         ],
         Kind::Microwave => vec![
             body,
             Solid::axis(
-                Vec3::new(w * 0.68, h * 0.68, 0.016),
-                Vec3::new(-w * 0.08, h * 0.5, front_z),
+                Vec3::new(w * 0.7, h * 0.7, 0.016),
+                Vec3::new(-w * 0.09, h * 0.5, front_z),
                 Surface::Appliance(2),
             ),
             Solid::axis(
@@ -1112,9 +1161,235 @@ fn appliance(size: Vec3, kind: Kind) -> Vec<Solid> {
                 Vec3::new(w * 0.39, h * 0.5, front_z),
                 Surface::Appliance(1),
             ),
+            appliance_handle(Vec3::new(w * 0.27, h * 0.5, front_z + 0.02), h * 0.48),
         ],
+        Kind::SquareSink => rectangular_sink(size, 1),
+        Kind::RoundSink => round_sink(size),
+        Kind::DoubleSink => rectangular_sink(size, 2),
+        Kind::SinkFaucet => {
+            let tube = w.min(d).min(0.045).max(0.018);
+            vec![
+                Solid::axis(
+                    Vec3::new(tube * 2.2, 0.025, tube * 2.2),
+                    Vec3::new(0.0, 0.0125, 0.0),
+                    Surface::ApplianceRound(1),
+                ),
+                Solid::axis(
+                    Vec3::new(tube, h * 0.82, tube),
+                    Vec3::new(0.0, h * 0.41, 0.0),
+                    Surface::ApplianceRound(1),
+                ),
+                Solid::axis(
+                    Vec3::new(tube, tube, d * 0.72),
+                    Vec3::new(0.0, h * 0.82, d * 0.28),
+                    Surface::ApplianceRound(1),
+                ),
+                Solid::axis(
+                    Vec3::new(tube, h * 0.18, tube),
+                    Vec3::new(0.0, h * 0.75, d * 0.64),
+                    Surface::ApplianceRound(1),
+                ),
+            ]
+        }
+        Kind::CentralHeatingBoiler => vec![
+            body,
+            Solid::axis(
+                Vec3::new(w * 0.42, h * 0.13, 0.018),
+                Vec3::new(0.0, h * 0.28, front_z),
+                Surface::Appliance(2),
+            ),
+            Solid::axis(
+                Vec3::new(w * 0.74, 0.025, 0.025),
+                Vec3::new(0.0, h * 0.1, front_z + 0.015),
+                Surface::Handle,
+            ),
+            // Visible service pipes under the boiler.
+            Solid::axis(
+                Vec3::new(0.025, h * 0.2, 0.025),
+                Vec3::new(-w * 0.22, -h * 0.1, 0.0),
+                Surface::ApplianceRound(1),
+            ),
+            Solid::axis(
+                Vec3::new(0.025, h * 0.2, 0.025),
+                Vec3::new(w * 0.22, -h * 0.1, 0.0),
+                Surface::ApplianceRound(1),
+            ),
+        ],
+        Kind::AirConditioner => {
+            let mut parts = vec![
+                body,
+                Solid::axis(
+                    Vec3::new(w * 0.88, h * 0.18, 0.018),
+                    Vec3::new(0.0, h * 0.18, front_z),
+                    Surface::Appliance(2),
+                ),
+            ];
+            for index in 0..5 {
+                let x = -w * 0.32 + index as f32 * w * 0.16;
+                parts.push(Solid::axis(
+                    Vec3::new(0.012, h * 0.13, 0.022),
+                    Vec3::new(x, h * 0.18, front_z + 0.014),
+                    Surface::Appliance(1),
+                ));
+            }
+            parts
+        }
         _ => vec![body],
     }
+}
+
+/// A drop-in wash basin. The top is an open rim; the bowl hangs below it.
+fn rectangular_sink(size: Vec3, bowls: u8) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    let bowls = bowls.max(1);
+    let lip = 0.028_f32.min(w * 0.08).min(d * 0.08);
+    let wall = 0.012_f32.min(lip * 0.6).max(0.008);
+    let floor_t = 0.01_f32.min(h * 0.12);
+    let rim_h = 0.016_f32.min(h * 0.18);
+    let metal = Surface::Appliance(1);
+    let basin = Surface::Appliance(2);
+    let mut parts = Vec::new();
+
+    parts.push(Solid::axis(
+        Vec3::new(w, floor_t, d),
+        Vec3::new(0.0, floor_t * 0.5, 0.0),
+        metal,
+    ));
+
+    let side_h = (h - rim_h - floor_t).max(0.04);
+    let side_y = floor_t + side_h * 0.5;
+    parts.push(Solid::axis(
+        Vec3::new(wall, side_h, d),
+        Vec3::new(-w * 0.5 + wall * 0.5, side_y, 0.0),
+        metal,
+    ));
+    parts.push(Solid::axis(
+        Vec3::new(wall, side_h, d),
+        Vec3::new(w * 0.5 - wall * 0.5, side_y, 0.0),
+        metal,
+    ));
+    let span_w = (w - wall * 2.0).max(0.02);
+    parts.push(Solid::axis(
+        Vec3::new(span_w, side_h, wall),
+        Vec3::new(0.0, side_y, d * 0.5 - wall * 0.5),
+        metal,
+    ));
+    parts.push(Solid::axis(
+        Vec3::new(span_w, side_h, wall),
+        Vec3::new(0.0, side_y, -d * 0.5 + wall * 0.5),
+        metal,
+    ));
+
+    let open_w = (w - lip * 2.0).max(0.05);
+    let open_d = (d - lip * 2.0 - wall * 2.0).max(0.04);
+    let bowl_w = ((open_w - wall * (bowls - 1) as f32) / bowls as f32).max(0.04);
+    if bowls > 1 {
+        for index in 1..bowls {
+            let x = -open_w * 0.5 + index as f32 * bowl_w + (index as f32 - 0.5) * wall;
+            parts.push(Solid::axis(
+                Vec3::new(wall, side_h, open_d),
+                Vec3::new(x, side_y, 0.0),
+                metal,
+            ));
+        }
+    }
+
+    let rim_y = h - rim_h * 0.5;
+    parts.push(Solid::axis(
+        Vec3::new(w, rim_h, lip),
+        Vec3::new(0.0, rim_y, d * 0.5 - lip * 0.5),
+        metal,
+    ));
+    parts.push(Solid::axis(
+        Vec3::new(w, rim_h, lip),
+        Vec3::new(0.0, rim_y, -d * 0.5 + lip * 0.5),
+        metal,
+    ));
+    let side_lip_d = (d - lip * 2.0).max(0.02);
+    parts.push(Solid::axis(
+        Vec3::new(lip, rim_h, side_lip_d),
+        Vec3::new(-w * 0.5 + lip * 0.5, rim_y, 0.0),
+        metal,
+    ));
+    parts.push(Solid::axis(
+        Vec3::new(lip, rim_h, side_lip_d),
+        Vec3::new(w * 0.5 - lip * 0.5, rim_y, 0.0),
+        metal,
+    ));
+
+    for index in 0..bowls {
+        let x = -open_w * 0.5 + bowl_w * 0.5 + index as f32 * (bowl_w + wall);
+        parts.push(Solid::axis(
+            Vec3::new(
+                (bowl_w - 0.012).max(0.03),
+                0.004,
+                (open_d - 0.012).max(0.03),
+            ),
+            Vec3::new(x, floor_t + 0.004, 0.0),
+            basin,
+        ));
+        parts.push(Solid::axis(
+            Vec3::new(0.038, 0.008, 0.038),
+            Vec3::new(x, floor_t + 0.01, open_d * 0.08),
+            Surface::ApplianceRound(2),
+        ));
+    }
+    parts
+}
+
+/// A round wash basin built as an open ring of wall panels around a floor.
+fn round_sink(size: Vec3) -> Vec<Solid> {
+    let (_w, h, _d) = (size.x, size.y, size.z);
+    let radius = size.x.min(size.z) * 0.48;
+    let wall = 0.014_f32.min(radius * 0.12);
+    let floor_t = 0.01_f32.min(h * 0.12);
+    let rim_h = 0.016_f32.min(h * 0.18);
+    let segments = 12u8;
+    let metal = Surface::Appliance(1);
+    let mut parts = vec![Solid::axis(
+        Vec3::new(radius * 2.0, floor_t, radius * 2.0),
+        Vec3::new(0.0, floor_t * 0.5, 0.0),
+        Surface::ApplianceRound(1),
+    )];
+
+    let side_h = (h - rim_h - floor_t).max(0.04);
+    let side_y = floor_t + side_h * 0.5;
+    let step = std::f32::consts::TAU / segments as f32;
+    let chord = 2.0 * radius * (step * 0.5).sin() * 1.04;
+    for index in 0..segments {
+        let angle = index as f32 * step;
+        let mid = radius - wall * 0.5;
+        parts.push(Solid {
+            size: Vec3::new(chord, side_h, wall).max(Vec3::splat(0.001)),
+            translation: Vec3::new(angle.cos() * mid, side_y, angle.sin() * mid),
+            rotation: Quat::from_rotation_y(-angle),
+            role: metal,
+        });
+        let rim_mid = radius - wall * 0.35;
+        parts.push(Solid {
+            size: Vec3::new(chord, rim_h, wall * 1.7).max(Vec3::splat(0.001)),
+            translation: Vec3::new(
+                angle.cos() * rim_mid,
+                h - rim_h * 0.5,
+                angle.sin() * rim_mid,
+            ),
+            rotation: Quat::from_rotation_y(-angle),
+            role: metal,
+        });
+    }
+
+    let inner = (radius - wall * 2.2).max(0.04);
+    parts.push(Solid::axis(
+        Vec3::new(inner * 2.0, 0.004, inner * 2.0),
+        Vec3::new(0.0, floor_t + 0.004, 0.0),
+        Surface::ApplianceRound(2),
+    ));
+    parts.push(Solid::axis(
+        Vec3::new(0.04, 0.008, 0.04),
+        Vec3::new(0.0, floor_t + 0.01, 0.0),
+        Surface::ApplianceRound(2),
+    ));
+    parts
 }
 
 fn appliance_handle(at: Vec3, length: f32) -> Solid {
@@ -1546,6 +1821,13 @@ impl ProjectFile {
 mod tests {
     use super::*;
 
+    fn point_in_solid(part: &Solid, point: Vec3) -> bool {
+        let local = part.rotation.inverse() * (point - part.translation);
+        local.x.abs() <= part.size.x * 0.5
+            && local.y.abs() <= part.size.y * 0.5
+            && local.z.abs() <= part.size.z * 0.5
+    }
+
     #[test]
     fn drawers_split_the_front_into_equal_bands() {
         let furniture = Furniture::new(Kind::Drawers { count: 3 }, 600.0, 720.0, 560.0);
@@ -1588,12 +1870,39 @@ mod tests {
             (Kind::Refrigerator, 4),
             (Kind::Dishwasher, 3),
             (Kind::ElectricOven, 4),
-            (Kind::CoffeeMachine, 3),
-            (Kind::Microwave, 3),
+            (Kind::CoffeeMachine, 6),
+            (Kind::Microwave, 4),
+            (Kind::SquareSink, 11),
+            (Kind::RoundSink, 27),
+            (Kind::DoubleSink, 14),
+            (Kind::SinkFaucet, 4),
+            (Kind::CentralHeatingBoiler, 5),
+            (Kind::AirConditioner, 7),
         ];
         for (kind, expected) in cases {
             let furniture = Furniture::new(kind, 600.0, 720.0, 560.0);
             assert_eq!(solids(&furniture).len(), expected, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn kitchen_sinks_are_open_wash_basins() {
+        for kind in [Kind::SquareSink, Kind::RoundSink, Kind::DoubleSink] {
+            let furniture = Furniture::new(kind, 600.0, 180.0, 500.0);
+            let parts = solids(&furniture);
+            let top = parts
+                .iter()
+                .map(|part| part.translation.y + part.size.y * 0.5)
+                .fold(0.0, f32::max);
+            let sample = Vec3::new(0.12, top - 0.03, 0.0);
+            assert!(
+                parts.iter().all(|part| !point_in_solid(part, sample)),
+                "{kind:?} covers the top of its basin"
+            );
+            assert!(
+                parts.iter().any(|part| part.translation.y < 0.02),
+                "{kind:?} has no basin floor"
+            );
         }
     }
 
