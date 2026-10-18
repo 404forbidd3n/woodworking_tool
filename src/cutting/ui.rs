@@ -13,8 +13,8 @@ use crate::layout::model::Furniture;
 use crate::theme::{self, dropdown};
 
 use super::from_room::parts_from_furniture;
-use super::job::{CutJob, CutPart, PartRole};
-use super::pack::{self, PlacedPart};
+use super::job::{CutJob, CutListGroup, CutPart, PartRole};
+use super::pack;
 use super::CutPlannerCamera;
 
 const PART_COLORS: [[u8; 3]; 8] = [
@@ -50,9 +50,11 @@ pub fn draw(
         .frame(theme::toolbar_frame())
         .show(&mut viewport_ui, |ui| draw_toolbar(ui, &mut job));
 
+    let side_max = (ctx.viewport_rect().width() * 0.42).clamp(300.0, 460.0);
     egui::Panel::left("cut_parts")
         .resizable(true)
-        .default_size(340.0)
+        .default_size(320.0)
+        .max_size(side_max)
         .frame(theme::sidebar_frame())
         .show(&mut viewport_ui, |ui| {
             draw_sidebar(ui, &mut job, &furniture)
@@ -60,11 +62,11 @@ pub fn draw(
 
     egui::CentralPanel::default()
         .frame(theme::sidebar_frame())
-        .show(&mut viewport_ui, |ui| draw_canvas(ui, &job));
+        .show(&mut viewport_ui, |ui| draw_canvas(ui, &mut job));
 }
 
 fn draw_toolbar(ui: &mut egui::Ui, job: &mut CutJob) {
-    let cream = egui::Color32::from_rgb(246, 236, 220);
+    let cream = theme::ink();
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Cut planner")
@@ -78,6 +80,7 @@ fn draw_toolbar(ui: &mut egui::Ui, job: &mut CutJob) {
                 .clicked()
             {
                 job.estimate = Some(pack::estimate(&job.board, &job.parts));
+                job.sheet_page = 0;
             }
             if let Some(estimate) = &job.estimate {
                 let waste = (estimate.waste_ratio() * 100.0).round();
@@ -118,11 +121,24 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
             dropdown(ui, "Parts to cut", true, |ui| {
                 draw_draft(ui, job);
                 ui.separator();
-                if job.parts.is_empty() {
-                    ui.label("Nothing to cut yet.");
+                draw_list_tabs(ui, job);
+                let group = job.list_group;
+                let showing = job
+                    .parts
+                    .iter()
+                    .any(|part| part.role.group() == group);
+                if !showing {
+                    let empty = match group {
+                        CutListGroup::Doors => "No doors or drawer fronts yet.",
+                        CutListGroup::Parts => "No carcass parts yet.",
+                    };
+                    ui.label(empty);
                 }
                 let mut remove = None;
                 for (index, part) in job.parts.iter().enumerate() {
+                    if part.role.group() != group {
+                        continue;
+                    }
                     if part_row(ui, index, part) {
                         remove = Some(index);
                     }
@@ -132,14 +148,23 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
                     job.mark_stale();
                 }
                 ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let clear_label = match group {
+                        CutListGroup::Doors => "Clear doors",
+                        CutListGroup::Parts => "Clear parts",
+                    };
+                    if ui.button(clear_label).clicked() {
+                        job.clear_group(group);
+                    }
+                    if ui.button("Clear list").clicked() {
+                        job.parts.clear();
+                        job.mark_stale();
+                    }
+                });
                 if ui.button("Add parts from the room").clicked() {
                     for piece in furniture.iter() {
                         job.parts.extend(parts_from_furniture(piece));
                     }
-                    job.mark_stale();
-                }
-                if ui.button("Clear list").clicked() {
-                    job.parts.clear();
                     job.mark_stale();
                 }
             });
@@ -171,61 +196,89 @@ fn draw_draft(ui: &mut egui::Ui, job: &mut CutJob) {
     }
 }
 
+fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
+    let doors = job
+        .parts
+        .iter()
+        .filter(|part| part.role.is_front())
+        .count();
+    let carcass = job.parts.len() - doors;
+    ui.horizontal(|ui| {
+        ui.selectable_value(
+            &mut job.list_group,
+            CutListGroup::Doors,
+            format!("Doors ({doors})"),
+        );
+        ui.selectable_value(
+            &mut job.list_group,
+            CutListGroup::Parts,
+            format!("Parts ({carcass})"),
+        );
+    });
+    let note = match job.list_group {
+        CutListGroup::Doors => "Doors and drawer fronts. These are often MDF, not the carcass sheet.",
+        CutListGroup::Parts => "Sides, tops, bottoms, shelves, backs, and the rest of the carcass.",
+    };
+    ui.weak(note);
+}
+
 fn part_row(ui: &mut egui::Ui, index: usize, part: &CutPart) -> bool {
     let color = part_color(index);
     let mut remove = false;
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, 3.0, color);
         ui.label(
-            egui::RichText::new(format!(
-                "{} × {}   {:.0} × {:.0}",
-                part.quantity,
-                part.titled(),
-                part.width_mm,
-                part.height_mm
-            ))
-            .color(egui::Color32::BLACK),
+            egui::RichText::new(part.role.tag())
+                .size(12.0)
+                .color(theme::ink())
+                .background_color(theme::chip()),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Remove").clicked() {
-                remove = true;
-            }
-        });
+        let text_width = (ui.available_width() - 84.0).max(40.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(text_width, 36.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(format!("{} × {}", part.quantity, part.titled()))
+                            .color(theme::ink()),
+                    )
+                    .truncate(),
+                );
+                ui.weak(format!("{:.0} × {:.0} mm", part.width_mm, part.height_mm));
+            },
+        );
+        if ui.button("Remove").clicked() {
+            remove = true;
+        }
     });
     remove
 }
 
-fn draw_canvas(ui: &mut egui::Ui, job: &CutJob) {
+fn draw_canvas(ui: &mut egui::Ui, job: &mut CutJob) {
     let available = ui.available_size();
-    let Some(estimate) = &job.estimate else {
-        ui.allocate_space(available);
-        ui.painter().text(
-            ui.max_rect().center(),
-            egui::Align2::CENTER_CENTER,
-            "Add the parts, then press Estimate.",
-            egui::FontId::new(18.0, egui::FontFamily::Proportional),
-            egui::Color32::BLACK,
-        );
+    if job.estimate.is_none() {
+        paint_canvas_message(ui, available, "Add the parts, then press Estimate.");
         return;
-    };
-    if estimate.sheets.is_empty() {
-        ui.allocate_space(available);
-        ui.painter().text(
-            ui.max_rect().center(),
-            egui::Align2::CENTER_CENTER,
-            "No part fitted on the sheet.",
-            egui::FontId::new(18.0, egui::FontFamily::Proportional),
-            egui::Color32::BLACK,
-        );
+    }
+    if job
+        .estimate
+        .as_ref()
+        .is_some_and(|estimate| estimate.sheets.is_empty())
+    {
+        paint_canvas_message(ui, available, "No part fitted on the sheet.");
         return;
     }
 
-    let note_height = if estimate.too_big.is_empty() {
-        0.0
-    } else {
+    let too_big: Vec<usize> = job
+        .estimate
+        .as_ref()
+        .map(|estimate| estimate.too_big.clone())
+        .unwrap_or_default();
+    if !too_big.is_empty() {
         ui.label("These do not fit on the sheet, even turned:");
-        for index in &estimate.too_big {
+        for index in &too_big {
             if let Some(part) = job.parts.get(*index) {
                 ui.label(format!(
                     "{}   {:.0} × {:.0} mm",
@@ -235,44 +288,82 @@ fn draw_canvas(ui: &mut egui::Ui, job: &CutJob) {
                 ));
             }
         }
-        ui.min_rect().height()
-    };
-    let viewport = egui::vec2(available.x, (available.y - note_height).max(160.0));
-    let several = estimate.sheets.len() > 1;
-    if several {
-        egui::ScrollArea::vertical()
-            .id_salt("cut_canvas")
-            .show(ui, |ui| {
-                for (sheet_index, sheet) in estimate.sheets.iter().enumerate() {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Board {} of {}",
-                            sheet_index + 1,
-                            estimate.sheets.len()
-                        ))
-                        .strong()
-                        .size(16.0)
-                        .color(egui::Color32::BLACK),
-                    );
-                    draw_sheet(ui, job, &sheet.parts, viewport.y - 28.0);
-                    ui.add_space(16.0);
-                }
-            });
-    } else {
-        draw_sheet(ui, job, &estimate.sheets[0].parts, viewport.y);
     }
+
+    let sheet_count = job.estimate.as_ref().map(|estimate| estimate.sheets.len()).unwrap_or(0);
+    if sheet_count == 0 {
+        return;
+    }
+    if job.sheet_page >= sheet_count {
+        job.sheet_page = sheet_count - 1;
+    }
+    if sheet_count > 1 {
+        let page = job.sheet_page;
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(page > 0, egui::Button::new("Previous"))
+                .clicked()
+            {
+                job.sheet_page = page - 1;
+            }
+            ui.label(
+                egui::RichText::new(format!("Board {} of {}", page + 1, sheet_count))
+                    .strong()
+                    .size(16.0)
+                    .color(theme::ink()),
+            );
+            if ui
+                .add_enabled(page + 1 < sheet_count, egui::Button::new("Next"))
+                .clicked()
+            {
+                job.sheet_page = page + 1;
+            }
+        });
+    }
+
+    let mut height = ui.available_height();
+    if !height.is_finite() || height < 240.0 {
+        height = 240.0;
+    }
+    let page = job.sheet_page;
+    draw_sheet(ui, job, page, height);
 }
 
-fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, placed: &[PlacedPart], height: f32) {
+fn paint_canvas_message(ui: &mut egui::Ui, available: egui::Vec2, message: &str) {
+    let size = if available.x.is_finite() && available.y.is_finite() {
+        available
+    } else {
+        ui.max_rect().size()
+    };
+    ui.allocate_space(size);
+    ui.painter().text(
+        ui.max_rect().center(),
+        egui::Align2::CENTER_CENTER,
+        message,
+        egui::FontId::new(18.0, egui::FontFamily::Proportional),
+        theme::ink(),
+    );
+}
+
+fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, page: usize, height: f32) {
+    let Some(placed) = job
+        .estimate
+        .as_ref()
+        .and_then(|estimate| estimate.sheets.get(page))
+        .map(|sheet| sheet.parts.as_slice())
+    else {
+        return;
+    };
     let board_w = job.board.width_mm.max(1.0);
     let board_h = job.board.height_mm.max(1.0);
-    // Wide enough for "4000 mm" at the large size, so the height is not clipped.
-    let left_band = 128.0;
-    let top_band = 40.0;
     let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height.max(top_band + 80.0)),
+        egui::vec2(ui.available_width().max(80.0), height),
         egui::Sense::hover(),
     );
+    // Leave room for the millimetre captions without giving them a fixed
+    // band that can shrink the board down to a thumbnail.
+    let left_band = (rect.width() * 0.08).clamp(64.0, 96.0);
+    let top_band = 32.0;
     let inner_w = (rect.width() - left_band).max(40.0);
     let inner_h = (rect.height() - top_band).max(40.0);
     let scale = (inner_w / board_w).min(inner_h / board_h);
@@ -298,14 +389,14 @@ fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, placed: &[PlacedPart], height: f3
         egui::Align2::CENTER_BOTTOM,
         format!("{board_w:.0} mm"),
         font.clone(),
-        egui::Color32::BLACK,
+        theme::ink(),
     );
     painter.text(
         egui::pos2(sheet.left() - 10.0, sheet.center().y),
         egui::Align2::RIGHT_CENTER,
         format!("{board_h:.0} mm"),
         font,
-        egui::Color32::BLACK,
+        theme::ink(),
     );
 
     for piece in placed {
@@ -321,20 +412,21 @@ fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, placed: &[PlacedPart], height: f3
         painter.rect_stroke(
             piece_rect,
             2.0,
-            egui::Stroke::new(1.0, egui::Color32::from_black_alpha(80)),
+            egui::Stroke::new(2.0, egui::Color32::from_black_alpha(160)),
             egui::StrokeKind::Inside,
         );
-        if size.x > 46.0 && size.y > 28.0 {
+        if size.x > 28.0 && size.y > 16.0 {
             let caption = job
                 .parts
                 .get(piece.part_index)
                 .map(|part| part.titled())
                 .unwrap_or_default();
+            let font_size = (size.y * 0.28).clamp(10.0, 16.0);
             painter.text(
                 piece_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 format!("{caption}\n{:.0}×{:.0}", piece.width_mm, piece.height_mm),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(font_size),
                 text_on(fill),
             );
         }

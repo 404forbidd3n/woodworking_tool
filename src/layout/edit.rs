@@ -168,13 +168,9 @@ pub fn pointer(
         return;
     }
 
-    // A drag that starts on the sidebar, or on a slider that is already
-    // being dragged, must not orbit the room. The custom-color popup floats
-    // over the stage, so those clicks belong to egui as well.
-    if over_chrome(&window, &sidebar, &toolbar, &properties)
-        || egui.is_using_pointer()
-        || egui.is_popup_open()
-    {
+    // The stage is only the rectangle beside the panels. A click or drag on
+    // the toolbar, sidebar, Properties, or an open popup stays with egui.
+    if over_chrome(&window, &sidebar, &toolbar, &properties) || egui.wants_any_pointer_input() {
         return;
     }
 
@@ -397,6 +393,7 @@ pub fn shortcuts(
     }
 }
 
+/// Draw the room only in the area that is not covered by the toolbar or panels.
 pub fn orbit_camera(
     mut camera: Query<(&mut Transform, &mut OrbitCamera)>,
     drag: Res<Drag>,
@@ -405,13 +402,14 @@ pub fn orbit_camera(
     sidebar: Res<SidebarWidth>,
     toolbar: Res<ToolbarHeight>,
     properties: Res<PropertiesUi>,
+    egui: Res<EguiWantsInput>,
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     let Ok((mut transform, mut orbit)) = camera.single_mut() else {
         return;
     };
 
-    if !over_chrome(&window, &sidebar, &toolbar, &properties) {
+    if !over_chrome(&window, &sidebar, &toolbar, &properties) && !egui.wants_any_pointer_input() {
         let lines = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y,
             MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
@@ -534,17 +532,6 @@ pub fn sidebar(
         .frame(theme::sidebar_frame())
         .show(&mut viewport_ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                dropdown(ui, "Project", false, |ui| {
-                    draw_project(
-                        ui,
-                        &mut room,
-                        &mut editor,
-                        &pieces,
-                        &mut cut_job,
-                        &mut dialogs,
-                    );
-                });
-
                 dropdown(ui, "View", false, |ui| {
                     ui.horizontal(|ui| {
                         if ui.button("Corner").clicked() {
@@ -581,6 +568,9 @@ pub fn sidebar(
                             }
                         }
                     });
+                    ui.separator();
+                    ui.checkbox(&mut editor.snap_enabled, "Snap moves to a grid");
+                    mm_row(ui, "Step", &mut editor.snap_mm, 1.0..=500.0);
                 });
 
                 dropdown(ui, "Room", true, |ui| {
@@ -871,29 +861,6 @@ pub fn sidebar(
                         properties.open = true;
                     }
                 });
-
-                dropdown(ui, "Snap", false, |ui| {
-                    ui.checkbox(&mut editor.snap_enabled, "Snap moves to a grid");
-                    mm_row(ui, "Step", &mut editor.snap_mm, 1.0..=500.0);
-                });
-
-                // Help stays last so the working sections stay above the instructions.
-                dropdown(ui, "Help", false, |ui| {
-                    ui.weak("Millimeters. Origin is the back-left corner of the floor.");
-                    ui.weak("Drag empty space to orbit. Drag a piece to move it.");
-                    ui.weak("Right-drag, or hold Space and drag, to pan. Scroll zooms.");
-                    ui.weak("Hold Shift while moving to raise or lower.");
-                    ui.weak("R rotates 90°. D duplicates. Delete removes.");
-                    ui.weak("Arrows nudge. Page Up / Page Down change height. F frames.");
-                    ui.weak("The corner marks are X red, Y green, Z blue.");
-                    ui.weak("Ctrl-click or Cmd-click selects multiple pieces.");
-                    ui.weak("Dragging one selected piece moves the whole selection.");
-                    ui.weak(
-                        "Right-click a piece and choose Properties to edit it in the side panel.",
-                    );
-                    ui.weak("Right-drag still pans.");
-                    ui.weak("Cut planner opens the sheet layout in its own window.");
-                });
             });
         });
     // Properties docks beside the sidebar, so the 3D view treats both as one strip.
@@ -930,8 +897,8 @@ fn draw_toolbar(
     history: &mut History,
     dialogs: &mut NativeDialog,
 ) {
-    let cream = egui::Color32::from_rgb(246, 236, 220);
-    let muted = egui::Color32::from_rgb(214, 196, 170);
+    let cream = theme::ink();
+    let muted = theme::muted();
     let error = editor.status.starts_with("Could") || editor.status.starts_with("No file");
     ui.horizontal(|ui| {
         ui.label(
@@ -942,7 +909,7 @@ fn draw_toolbar(
         );
         ui.add_space(6.0);
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(96, 74, 56))
+            .fill(theme::chip())
             .corner_radius(egui::CornerRadius::same(6))
             .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| {
@@ -1177,7 +1144,7 @@ fn draw_properties_panel(
             egui::RichText::new("Properties")
                 .strong()
                 .size(16.0)
-                .color(egui::Color32::BLACK),
+                .color(theme::ink()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Close").clicked() {
@@ -1562,7 +1529,7 @@ fn draw_properties(
             egui::RichText::new("Materials & colors")
                 .strong()
                 .size(15.0)
-                .color(egui::Color32::BLACK),
+                .color(theme::ink()),
         )
         .default_open(true)
         .show(ui, |ui| {
@@ -1756,30 +1723,6 @@ fn perform_history(
         project::restore(target, commands, room, editor, selection, &existing);
         editor.status = if redo { "Redone" } else { "Undone" }.into();
     }
-}
-
-fn draw_project(
-    ui: &mut egui::Ui,
-    room: &mut Room,
-    editor: &mut Editor,
-    pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
-    cut_job: &mut CutJob,
-    dialogs: &mut NativeDialog,
-) {
-    ui.weak("File in the project folder");
-    ui.add(egui::TextEdit::singleline(&mut editor.path).desired_width(f32::INFINITY));
-    ui.horizontal(|ui| {
-        if ui.button("Save").clicked() {
-            save_layout(editor, room, pieces, cut_job);
-        }
-        if ui.button("Save As").clicked() {
-            begin_dialog(dialogs, editor, DialogRequest::Save);
-        }
-        if ui.button("Load").clicked() {
-            begin_dialog(dialogs, editor, DialogRequest::Open);
-        }
-    });
-    ui.weak("Cmd+S also saves.");
 }
 
 fn save_layout(

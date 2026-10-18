@@ -46,24 +46,28 @@ Cmd/Ctrl+S performs a quick save.
 
 ### 3.2 Sidebar
 
-The sidebar uses collapsible sections with bold black headings. Room is open by
+The panels, toolbar, and cut planner use a dark macOS-style theme: graphite
+backgrounds, light text, and a blue accent. The 3D room itself keeps its
+existing floor, walls, and lighting. Measurement labels on the room stay black
+on a light backing.
+
+The sidebar uses collapsible sections with bold light headings. Room is open by
 default; other sections start closed.
 
 Sections include:
 
-1. Project
-2. View
-3. Room
-4. Add Furniture
-5. Add Surfaces
-6. Add Appliances
-7. In the room
-8. Selected
-9. Snap
-10. Help
+1. View — camera buttons, plus the snap checkbox and step
+2. Room
+3. Add Furniture
+4. Add Surfaces
+5. Add Appliances
+6. In the room
+7. Selected
 
-Properties opens as a docked panel beside the sidebar. It never floats over the
-3D stage.
+Load, Save, and Save As live only on the toolbar. Properties opens as a docked
+panel beside the sidebar. Clicks and scrolling on the toolbar, the sidebar, and
+the properties panel stay on those controls. The 3D view ignores the pointer
+there, so it does not select or move pieces.
 
 ## 4. Furniture catalog
 
@@ -172,7 +176,8 @@ relative positions.
 - Cmd/Ctrl+Z — undo.
 - Shift+Cmd/Ctrl+Z or Cmd/Ctrl+Y — redo.
 
-Snap is enabled by default with a 50 mm step and can be changed or disabled.
+Snap is enabled by default with a 50 mm step. The checkbox and step live in
+the View section.
 
 ### 6.3 Properties
 
@@ -343,6 +348,13 @@ Each part has:
 - width and height;
 - quantity.
 
+The list is split into two tabs:
+
+- **Doors** — doors and drawer fronts. Each row starts with a Door or Drawer tag. These are often a different sheet, such as MDF.
+- **Parts** — sides, tops, bottoms, shelves, backs, dividers, and other carcass pieces. Each row starts with its role tag.
+
+Each row shows the tag, the quantity and name, and the size in millimetres. A row can be removed on its own. **Clear doors** or **Clear parts** drops only the open tab. **Clear list** drops both. Importing the room still adds every cut piece from the cabinets into the matching tab. Estimate packs whatever is still in either tab, so clearing Doors leaves only the carcass on the sheet.
+
 Parts can be entered manually or imported from furniture in the room.
 Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
 
@@ -357,9 +369,12 @@ followed by crosscuts. It:
 - reports parts that cannot fit;
 - shows board count and estimated offcut percentage.
 
-Every board is drawn on a responsive 2D canvas. The full sheet remains visible,
-board dimensions are labelled in millimetres, and parts use distinct colours
-with names and dimensions where space permits.
+One board is drawn at a time and fills the canvas beside the parts list.
+**Previous** and **Next** step through extra sheets. The drawn sheet stays a
+light board with a dark outline so the cuts stay readable on the dark planner.
+Board dimensions are labelled in millimetres, and parts use distinct colours
+with names and dimensions. The parts list has a maximum width, so it cannot
+grow across the window and shrink that diagram.
 
 ## 12. Code organization
 

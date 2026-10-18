@@ -56,6 +56,35 @@ impl PartRole {
             .find(|role| role.label() == label)
             .unwrap_or(PartRole::Custom)
     }
+
+    /// Short name drawn in front of a list row.
+    pub fn tag(self) -> &'static str {
+        match self {
+            PartRole::DrawerFront => "Drawer",
+            other => other.label(),
+        }
+    }
+
+    /// Doors and drawer fronts are usually a different sheet, such as MDF.
+    pub fn is_front(self) -> bool {
+        matches!(self, PartRole::Door | PartRole::DrawerFront)
+    }
+
+    pub fn group(self) -> CutListGroup {
+        if self.is_front() {
+            CutListGroup::Doors
+        } else {
+            CutListGroup::Parts
+        }
+    }
+}
+
+/// The two lists inside the cut planner. Fronts stay apart from the carcass
+/// so a whole group can be dropped after the room is imported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CutListGroup {
+    Doors,
+    Parts,
 }
 
 /// One line in the parts list. `quantity` is how many identical rectangles
@@ -120,6 +149,10 @@ pub struct CutJob {
     pub draft_width_mm: f32,
     pub draft_height_mm: f32,
     pub draft_quantity: u32,
+    /// Which of the two lists is open. Not saved; it is only the open tab.
+    pub list_group: CutListGroup,
+    /// Which packed board is on screen when the estimate needs more than one.
+    pub sheet_page: usize,
     pub estimate: Option<super::pack::Estimate>,
 }
 
@@ -133,6 +166,8 @@ impl Default for CutJob {
             draft_width_mm: 600.0,
             draft_height_mm: 720.0,
             draft_quantity: 1,
+            list_group: CutListGroup::Doors,
+            sheet_page: 0,
             estimate: None,
         }
     }
@@ -206,14 +241,66 @@ impl CutJob {
 
     pub fn add_draft(&mut self) {
         let quantity = self.draft_quantity.clamp(1, 100);
+        let role = self.draft_role;
         self.parts.push(CutPart {
             name: self.draft_name.trim().to_owned(),
-            role: self.draft_role,
+            role,
             width_mm: self.draft_width_mm,
             height_mm: self.draft_height_mm,
             quantity,
         });
         self.draft_name.clear();
+        self.list_group = role.group();
         self.mark_stale();
+    }
+
+    /// Drop every door and drawer front, or every carcass part, and leave the other list.
+    pub fn clear_group(&mut self, group: CutListGroup) {
+        let before = self.parts.len();
+        self.parts.retain(|part| part.role.group() != group);
+        if self.parts.len() != before {
+            self.mark_stale();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn part(role: PartRole) -> CutPart {
+        CutPart {
+            name: role.label().to_owned(),
+            role,
+            width_mm: 100.0,
+            height_mm: 100.0,
+            quantity: 1,
+        }
+    }
+
+    #[test]
+    fn fronts_and_carcass_are_separate_groups() {
+        assert!(PartRole::Door.is_front());
+        assert!(PartRole::DrawerFront.is_front());
+        assert!(!PartRole::Side.is_front());
+        assert!(!PartRole::Shelf.is_front());
+        assert_eq!(PartRole::DrawerFront.group(), CutListGroup::Doors);
+        assert_eq!(PartRole::Top.group(), CutListGroup::Parts);
+    }
+
+    #[test]
+    fn clearing_doors_keeps_carcass_parts() {
+        let mut job = CutJob::default();
+        job.parts = vec![
+            part(PartRole::Door),
+            part(PartRole::DrawerFront),
+            part(PartRole::Side),
+            part(PartRole::Shelf),
+        ];
+        job.clear_group(CutListGroup::Doors);
+        let roles: Vec<_> = job.parts.iter().map(|part| part.role).collect();
+        assert_eq!(roles, vec![PartRole::Side, PartRole::Shelf]);
+        job.clear_group(CutListGroup::Parts);
+        assert!(job.parts.is_empty());
     }
 }
