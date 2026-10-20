@@ -8,7 +8,9 @@ kitchens, cabinets, furniture, and simple rooms. It combines:
 - a three-dimensional room editor;
 - configurable cabinet and appliance models;
 - project files that can be shared and reopened;
-- a separate two-dimensional sheet-cut planner.
+- a separate two-dimensional sheet-cut planner;
+- a sketch window for trying a custom furniture block before it becomes a
+  real catalog piece.
 
 The application is written in Rust with Bevy and egui. Dimensions shown to the
 user are millimetres; the renderer uses metres internally.
@@ -39,17 +41,21 @@ The toolbar displays the active project filename and provides:
 - **Load** — select a JSON project through the native operating-system dialog;
 - **Save** — overwrite the active project;
 - **Save As** — select a new JSON filename and location;
-- **Cut planner** — open the independent sheet-layout window;
-- **Undo** and **Redo** — restore recent layout edits.
+- **Cut planner** and **Component planner** — two large buttons centered on the
+  toolbar. Cut planner opens the sheet-layout window. Component planner opens
+  a sketch window for a custom block;
+- **Undo** and **Redo** — restore recent layout edits. Load, Save, and Save As
+  stay on the right.
 
 Cmd/Ctrl+S performs a quick save.
 
 ### 3.2 Sidebar
 
-The panels, toolbar, and cut planner use a dark macOS-style theme: graphite
-backgrounds, light text, and a blue accent. The 3D room itself keeps its
-existing floor, walls, and lighting. Measurement labels on the room stay black
-on a light backing.
+The panels, toolbar, cut planner, and component planner use a Visual Studio
+Code–style dark theme: near-black panels, white button labels, a blue outline
+on buttons, a solid blue fill while a button is pressed, and light-blue
+section titles. The 3D room itself keeps its existing floor, walls, and
+lighting. Measurement labels on the room stay black on a light backing.
 
 The sidebar uses collapsible sections with bold light headings. Room is open by
 default; other sections start closed.
@@ -65,9 +71,10 @@ Sections include:
 7. Selected
 
 Load, Save, and Save As live only on the toolbar. Properties opens as a docked
-panel beside the sidebar. Clicks and scrolling on the toolbar, the sidebar, and
-the properties panel stay on those controls. The 3D view ignores the pointer
-there, so it does not select or move pieces.
+panel beside the sidebar, at about 680 logical pixels so the paint and wood
+swatches fit on one line. It can still be resized. Clicks and scrolling on the
+toolbar, the sidebar, and the properties panel stay on those controls. The 3D
+view ignores the pointer there, so it does not select or move pieces.
 
 ## 4. Furniture catalog
 
@@ -77,6 +84,10 @@ there, so it does not select or move pieces.
 - Door Base Cabinet — one or two hinged doors.
 - Sliding-Door Cabinet — two overlapping leaves.
 - Open Shelf Cabinet — editable count of evenly spaced internal shelves.
+- Corner Base, Shelves — an L that runs 600 mm along each wall. Two small doors
+  close the straight arms, and two shelves sit in the 350 mm corner bay.
+- Corner Base, Double Door — the same L, closed by two hinged doors across the
+  diagonal opening.
 - Work Table — top and four structural legs.
 
 New floor cabinets have plastic 100 mm adjustable legs by default.
@@ -86,6 +97,15 @@ New floor cabinets have plastic 100 mm adjustable legs by default.
 - Wall Door Cabinet — one or two hinged doors.
 - Wall Lift-Up Cabinet — one top-hinged front.
 - Wall Drawer Cabinet — editable drawer count.
+- Corner Wall, Shelves — the same shelf-and-two-door corner cabinet, hung at
+  1400 mm with no legs.
+- Corner Wall, Double Door — the diagonal-door corner cabinet, hung at 1400 mm.
+
+Width on a corner cabinet is the run along the back wall. Depth is the run
+along the left wall. Both default to 600 mm. The arm depth stays 350 mm, which
+is deeper along the diagonal than on either straight margin. A 560 mm base
+depth on a 600 mm plan would leave almost no door opening, so floor corners
+use the same 600 × 600 plan as the wall ones and sit on the usual 100 mm legs.
 
 Wall cabinets default to 350 mm depth, have no floor legs, and are initially
 placed 1400 mm above the floor.
@@ -144,10 +164,26 @@ Available adjustable leg choices are:
 Four legs are positioned under a floor cabinet. Legs are purchased hardware
 and are excluded from plywood cutting estimates.
 
-Finishes can be edited independently for carcass parts, each front, handles,
-and tops. Their presets are oak, walnut, white, charcoal, stainless steel, and
-custom RGB colour. Appliance bodies instead use the focused silver metal,
-black, and dark-gray choices documented above.
+Any cabinet that has doors (hinged, lift-up, sliding, and both corner types)
+can use a solid front or a glass front. Glass is a frame of the front finish
+with a clear pane in the middle. The default is solid, so older project files
+still open with solid doors. Drawer fronts stay solid.
+
+Cabinet colours open on Body & fronts. Body paints every carcass board at
+once. Fronts paints every door and every drawer front at once. Handles stay
+one choice for the whole piece. Each board is a second tab for the left side,
+right side, bottom, top, back, and each door or drawer on its own. A mixed
+group, where those boards already differ, shows no swatch selected until you
+pick one.
+
+The picker is two rows of swatches. Paints are blue, nordic white (a cream
+white), military green, and black. Woods are pine, oak, walnut, white pine,
+poplar, cherry, and birch. Wood is drawn with a generated grain image so it
+reads as timber rather than flat paint. A custom colour already stored in an
+older file can still be edited; new choices come from the swatches. Appliance
+bodies instead use the focused silver metal, black, and dark-gray choices
+documented above. Tables and worktops keep a single frame colour and a single
+top colour.
 
 ## 6. Selection and editing
 
@@ -186,11 +222,12 @@ Properties exposes:
 - piece name;
 - width, carcass height, and depth;
 - drawer, door, or shelf count where relevant;
+- door face, solid or glass, on cabinets that have doors;
 - floor/wall placement;
 - adjustable leg style for floor cabinets;
 - X, Y, and Z position;
 - facing direction;
-- all applicable material and colour controls;
+- body and front colours, with a second tab for each board;
 - duplicate and delete actions.
 
 ## 7. Undo and redo
@@ -296,7 +333,8 @@ A project stores:
   lock, and openings;
 - snap settings;
 - furniture and pipe kind, name, dimensions, position, facing, placement, legs,
-  and finishes (a pipe's orientation, count, and color are part of its kind);
+  door face, and finishes (a pipe's orientation, count, and color are part of
+  its kind);
 - cut-planner board settings, draft values, and parts.
 
 The application reads versions 1, 2, and 3.
@@ -310,7 +348,13 @@ Migration rules:
 - missing room openings become an empty list;
 - a room saved before per-wall flags keeps its back, left, and right walls,
   with the front wall hidden;
-- missing cut-list data receives a 2440 × 1220 × 18 mm sheet.
+- missing cut-list data receives a 2440 × 1220 × 18 mm sheet;
+- a missing door face is solid;
+- pine, white pine, poplar, cherry, birch, blue, nordic white, military green,
+  and black are extra finish names on the same file version. Older files keep
+  the finishes they already stored.
+
+The component planner is not written into the project file.
 
 Relative paths resolve inside the project directory. Native dialogs may select
 files elsewhere. Load and Save As open those dialogs without stopping the
@@ -357,6 +401,9 @@ Each row shows the tag, the quantity and name, and the size in millimetres. A ro
 
 Parts can be entered manually or imported from furniture in the room.
 Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
+A corner cabinet contributes an approximate list: sides, top, bottom, back,
+two doors, and, for the shelf style, two shelves. A glass door is still listed
+as a door; the pane is bought, not cut from the sheet.
 
 ### 11.3 Estimate and canvas
 
@@ -376,6 +423,22 @@ Board dimensions are labelled in millimetres, and parts use distinct colours
 with names and dimensions. The parts list has a maximum width, so it cannot
 grow across the window and shrink that diagram.
 
+## 11.4 Component planner
+
+The Component planner is a separate window, opened from the center of the
+toolbar. It is a sketch for a future block builder.
+
+- Several named blocks can be started. A new block begins empty.
+- The first block is a sample: two walls, a bottom, a top, and a door.
+- Boards can be added as a wall, a door, a bottom, a top, or a back, then
+  removed. Each board keeps a width and a height in millimetres.
+- The canvas draws a front view: walls at the sides, bottoms and tops as
+  rails, doors in the opening, and a back behind them.
+
+Nothing in this window is saved, cut, or placed in the room. The drawing is a
+rough front view and is expected to change. How the boards join, and how a
+finished block becomes furniture, is still to be decided.
+
 ## 12. Code organization
 
 - `src/main.rs` — application resources, plugins, and schedules.
@@ -393,6 +456,8 @@ grow across the window and shrink that diagram.
 - `src/cutting/from_room.rs` — cabinet-to-cut-part conversion.
 - `src/cutting/ui.rs` — cut-planner interface and canvas.
 - `src/cutting/mod.rs` — second-window lifecycle and Egui schedule.
+- `src/builder/mod.rs` — component-planner window and the sketched blocks.
+- `src/builder/ui.rs` — the sketch list and the front-view drawing.
 - `src/theme.rs` — shared visual styling.
 
 The domain model does not depend on the cutting module. Conversion between
@@ -405,11 +470,17 @@ A release is acceptable when:
 - the project builds without compiler warnings;
 - all unit tests pass;
 - v1, v2, and v3 projects load safely;
-- the main window and cut-planner window open without panic or Egui pass errors;
+- the main window, the cut planner, and the component planner open without
+  panic or Egui pass errors;
 - save, Save As, and Load preserve room, furniture, materials, openings,
   utility pipes, and cut-list data;
 - undo/redo restore complete layout edits;
-- floor and wall catalogs create their documented defaults;
+- floor and wall catalogs create their documented defaults, including both
+  corner subtypes;
+- a cabinet door face can be switched between solid and glass, and a missing
+  door face in an older file stays solid;
+- body and front colours can be set together, and each board can be set on
+  its own tab;
 - room openings produce visible wall holes;
 - each of the four walls can be shown or hidden on its own;
 - a new pipe is 20 mm in diameter and its diameter can be edited;

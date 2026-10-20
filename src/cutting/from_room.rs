@@ -5,7 +5,7 @@
 //! small gap already used on the fronts, and no hardware.
 
 use crate::layout::model::{
-    equal_spans, m_to_mm, mm_to_m, Furniture, Kind, GAP_METERS, PANEL_METERS,
+    equal_spans, m_to_mm, mm_to_m, CornerStyle, Furniture, Kind, GAP_METERS, PANEL_METERS,
 };
 
 use super::job::{CutPart, PartRole};
@@ -56,6 +56,7 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
         Kind::LiftDoor | Kind::SlidingDoors => {
             cabinet(name, width, height, depth, panel, furniture.kind, 1)
         }
+        Kind::Corner { style } => corner_parts(name, width, height, depth, style),
         Kind::Refrigerator
         | Kind::Dishwasher
         | Kind::ElectricOven
@@ -69,6 +70,64 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
         | Kind::AirConditioner
         | Kind::Pipe { .. } => Vec::new(),
     }
+}
+
+fn corner_parts(
+    name: &str,
+    width: f32,
+    height: f32,
+    depth: f32,
+    style: CornerStyle,
+) -> Vec<CutPart> {
+    let arm = 350.0_f32.min(width * 0.62).min(depth * 0.62);
+    let extra_w = (width - arm).max(40.0);
+    let extra_d = (depth - arm).max(40.0);
+    let mut parts = vec![
+        named(name, PartRole::Side, arm, height, 2),
+        named(name, PartRole::Side, extra_d, height, 1),
+        named(name, PartRole::Top, width, arm, 1),
+        named(name, PartRole::Top, arm, extra_d, 1),
+        named(name, PartRole::Bottom, width, arm, 1),
+        named(name, PartRole::Bottom, arm, extra_d, 1),
+        named(
+            name,
+            PartRole::Back,
+            (width - 36.0).max(1.0),
+            (height - 36.0).max(1.0),
+            1,
+        ),
+        named(name, PartRole::Back, extra_d, (height - 36.0).max(1.0), 1),
+    ];
+    match style {
+        CornerStyle::ShelfDoors => {
+            parts.push(named(
+                name,
+                PartRole::Door,
+                (extra_w - 6.0).max(1.0),
+                (height - 6.0).max(1.0),
+                1,
+            ));
+            parts.push(named(
+                name,
+                PartRole::Door,
+                (extra_d - 6.0).max(1.0),
+                (height - 6.0).max(1.0),
+                1,
+            ));
+            parts.push(named(name, PartRole::Shelf, arm, arm, 2));
+        }
+        CornerStyle::DoubleDoor => {
+            let span = ((extra_w * extra_w + extra_d * extra_d).sqrt() * 0.5).max(40.0);
+            parts.push(named(
+                name,
+                PartRole::Door,
+                span,
+                (height - 6.0).max(1.0),
+                2,
+            ));
+        }
+    }
+    parts
 }
 
 fn cabinet(

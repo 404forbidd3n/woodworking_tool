@@ -2,37 +2,48 @@
 //!
 //! The layout window and the cut planner both call [`apply_theme`]. The 3D
 //! room is not recolored here; only the panels, toolbar, and controls are.
+//! The chrome follows a Visual Studio Code dark theme: near-black panels,
+//! a blue accent, and brighter section titles.
 
 use bevy_egui::egui;
 
 /// Primary text on the dark panels.
 pub fn ink() -> egui::Color32 {
-    egui::Color32::from_rgb(242, 242, 247)
+    egui::Color32::from_rgb(212, 212, 212)
 }
 
-/// Secondary text, still readable on graphite.
+/// Secondary text, still readable on the dark panels.
 pub fn muted() -> egui::Color32 {
-    egui::Color32::from_rgb(174, 174, 178)
+    egui::Color32::from_rgb(156, 156, 156)
+}
+
+/// Section titles and the accent used on selected swatches.
+pub fn heading() -> egui::Color32 {
+    egui::Color32::from_rgb(79, 193, 255)
 }
 
 pub fn paper() -> egui::Color32 {
-    egui::Color32::from_rgb(44, 44, 46)
+    egui::Color32::from_rgb(37, 37, 38)
 }
 
 pub fn chip() -> egui::Color32 {
-    egui::Color32::from_rgb(58, 58, 60)
+    egui::Color32::from_rgb(45, 45, 48)
 }
 
 fn chrome() -> egui::Color32 {
-    egui::Color32::from_rgb(28, 28, 30)
+    egui::Color32::from_rgb(30, 30, 30)
 }
 
 fn line() -> egui::Color32 {
-    egui::Color32::from_rgb(72, 72, 74)
+    egui::Color32::from_rgb(62, 62, 66)
 }
 
 fn accent() -> egui::Color32 {
-    egui::Color32::from_rgb(10, 132, 255)
+    egui::Color32::from_rgb(0, 122, 204)
+}
+
+fn accent_hover() -> egui::Color32 {
+    egui::Color32::from_rgb(9, 71, 113)
 }
 
 pub fn apply_theme(ctx: &egui::Context) {
@@ -51,21 +62,21 @@ pub fn apply_theme(ctx: &egui::Context) {
     visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, ink());
     visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, line());
     visuals.widgets.noninteractive.weak_bg_fill = paper();
-    visuals.widgets.inactive.weak_bg_fill = chip();
-    visuals.widgets.inactive.bg_fill = chip();
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, line());
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(72, 72, 74);
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(72, 72, 74);
-    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, ink());
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent());
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(60, 60, 64);
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(60, 60, 64);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
+    visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, accent());
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+    visuals.widgets.hovered.weak_bg_fill = accent_hover();
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(17, 119, 187);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, heading());
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
     visuals.widgets.active.weak_bg_fill = accent();
-    visuals.widgets.active.bg_fill = accent();
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0, 95, 160);
     visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
-    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, accent());
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, heading());
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
     visuals.widgets.open.weak_bg_fill = chip();
     visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0, ink());
     visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, line());
@@ -87,7 +98,7 @@ pub fn toolbar_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(chrome())
         .inner_margin(egui::Margin::symmetric(14, 8))
-        .stroke(egui::Stroke::new(1.0, line()))
+        .stroke(egui::Stroke::new(1.0, accent()))
 }
 
 pub fn sidebar_frame() -> egui::Frame {
@@ -105,11 +116,16 @@ pub fn dropdown(
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     ui.add_space(6.0);
-    egui::CollapsingHeader::new(egui::RichText::new(title).strong().size(15.0).color(ink()))
-        .default_open(open)
-        .show_background(true)
-        .show(ui, |ui| {
-            ui.add_space(2.0);
-            add_contents(ui);
-        });
+    egui::CollapsingHeader::new(
+        egui::RichText::new(title)
+            .strong()
+            .size(15.0)
+            .color(heading()),
+    )
+    .default_open(open)
+    .show_background(true)
+    .show(ui, |ui| {
+        ui.add_space(2.0);
+        add_contents(ui);
+    });
 }

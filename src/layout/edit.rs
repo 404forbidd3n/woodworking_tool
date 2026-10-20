@@ -11,6 +11,7 @@ use bevy::window::{PrimaryWindow, RequestRedraw};
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::builder::{self, ComponentWindow};
 use crate::cutting::{self, CutJob, CutWindow};
 use crate::theme::{self, dropdown, toolbar_frame};
 
@@ -18,9 +19,9 @@ use crate::layout::history::History;
 use crate::layout::model::{
     example_layout, m_to_mm, mm_to_m, pick_bounds, place, quarter_turns, ray_aabb,
     ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns,
-    sanitize_openings, snap_to_step, write_project, Editor, Finish, FinishPreset, Furniture, Kind,
-    LegStyle, Opening, OpeningKind, PipeColor, Placement, ProjectFile, ReadError, Room, Selection,
-    WallSide, PIPE_PAIR_GAP_MM,
+    sanitize_openings, snap_to_step, write_project, CornerStyle, DoorStyle, Editor, Finish,
+    FinishPreset, Furniture, Kind, LegStyle, Opening, OpeningKind, PipeColor, Placement,
+    ProjectFile, ReadError, Room, Selection, WallSide, PIPE_PAIR_GAP_MM,
 };
 use crate::layout::project::{self, DialogRequest, NativeDialog};
 use crate::layout::view::{self, OrbitCamera};
@@ -83,6 +84,9 @@ pub struct PropertiesUi {
     pub menu_rect: Option<Rect>,
     /// While set, the docked Properties panel shows the primary selection.
     pub open: bool,
+    /// The materials section opens on body and fronts. This switches to one
+    /// swatch row per board.
+    pub materials_detail: bool,
 }
 
 pub fn pointer(
@@ -453,6 +457,7 @@ pub fn sidebar(
     mut toolbar_height: ResMut<ToolbarHeight>,
     mut cut_job: ResMut<CutJob>,
     mut cut_window: ResMut<CutWindow>,
+    mut component_window: ResMut<ComponentWindow>,
     mut history: ResMut<History>,
     mut dialogs: NonSendMut<NativeDialog>,
 ) {
@@ -520,6 +525,7 @@ pub fn sidebar(
                 &pieces,
                 &mut cut_job,
                 &mut cut_window,
+                &mut component_window,
                 &mut history,
                 &mut dialogs,
             );
@@ -726,6 +732,18 @@ pub fn sidebar(
                         ("Door Base Cabinet", Kind::HingedDoors { doors: 2 }),
                         ("Sliding-Door Cabinet", Kind::SlidingDoors),
                         ("Open Shelf Cabinet", Kind::OpenShelves { shelves: 3 }),
+                        (
+                            "Corner Base, Shelves",
+                            Kind::Corner {
+                                style: CornerStyle::ShelfDoors,
+                            },
+                        ),
+                        (
+                            "Corner Base, Double Door",
+                            Kind::Corner {
+                                style: CornerStyle::DoubleDoor,
+                            },
+                        ),
                         ("Work Table", Kind::Table),
                     ] {
                         if library_button(ui, label, kind).clicked() {
@@ -740,6 +758,18 @@ pub fn sidebar(
                         ("Wall Door Cabinet", Kind::HingedDoors { doors: 2 }),
                         ("Wall Lift-Up Cabinet", Kind::LiftDoor),
                         ("Wall Drawer Cabinet", Kind::Drawers { count: 3 }),
+                        (
+                            "Corner Wall, Shelves",
+                            Kind::Corner {
+                                style: CornerStyle::ShelfDoors,
+                            },
+                        ),
+                        (
+                            "Corner Wall, Double Door",
+                            Kind::Corner {
+                                style: CornerStyle::DoubleDoor,
+                            },
+                        ),
                     ] {
                         if library_button(ui, label, kind).clicked() {
                             let entity =
@@ -868,7 +898,7 @@ pub fn sidebar(
     if properties.open {
         let docked = egui::Panel::left("properties")
             .resizable(true)
-            .default_size(340.0)
+            .default_size(680.0)
             .frame(theme::sidebar_frame())
             .show(&mut viewport_ui, |ui| {
                 draw_properties_panel(
@@ -894,6 +924,7 @@ fn draw_toolbar(
     pieces: &Query<(Entity, &mut Furniture, &mut Transform)>,
     cut_job: &mut CutJob,
     cut_window: &mut CutWindow,
+    component_window: &mut ComponentWindow,
     history: &mut History,
     dialogs: &mut NativeDialog,
 ) {
@@ -901,11 +932,15 @@ fn draw_toolbar(
     let muted = theme::muted();
     let error = editor.status.starts_with("Could") || editor.status.starts_with("No file");
     ui.horizontal(|ui| {
+        ui.set_min_height(48.0);
+        let origin = ui.cursor().min;
+        let full_width = ui.available_width();
+        ui.set_min_width(full_width);
         ui.label(
             egui::RichText::new("Woodworking")
                 .strong()
                 .size(16.0)
-                .color(cream),
+                .color(theme::heading()),
         );
         ui.add_space(6.0);
         egui::Frame::new()
@@ -919,6 +954,33 @@ fn draw_toolbar(
                         .color(cream),
                 );
             });
+        let planner = |label: &str| {
+            egui::Button::new(egui::RichText::new(label).size(16.0).strong())
+                .min_size(egui::vec2(210.0, 40.0))
+        };
+        let gap = 12.0;
+        let button_size = egui::vec2(210.0, 40.0);
+        let pair = button_size.x * 2.0 + gap;
+        let x = origin.x + (full_width - pair) * 0.5;
+        let y = origin.y + 4.0;
+        if ui
+            .put(
+                egui::Rect::from_min_size(egui::pos2(x, y), button_size),
+                planner("Cut planner"),
+            )
+            .clicked()
+        {
+            cutting::request_open(cut_window);
+        }
+        if ui
+            .put(
+                egui::Rect::from_min_size(egui::pos2(x + button_size.x + gap, y), button_size),
+                planner("Component planner"),
+            )
+            .clicked()
+        {
+            builder::request_open(component_window);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_enabled(history.can_redo(), egui::Button::new("Redo"))
@@ -940,9 +1002,6 @@ fn draw_toolbar(
             }
             if ui.button("Save As").clicked() {
                 begin_dialog(dialogs, editor, DialogRequest::Save);
-            }
-            if ui.button("Cut planner").clicked() {
-                cutting::request_open(cut_window);
             }
             if !editor.status.is_empty() {
                 let color = if error {
@@ -1127,6 +1186,27 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 );
             }
         }
+        Kind::Corner { style } => {
+            line(rect.left_top(), rect.left_bottom());
+            line(rect.left_bottom(), rect.right_bottom());
+            line(
+                egui::pos2(rect.left(), rect.top() + rect.height() * 0.42),
+                egui::pos2(
+                    rect.left() + rect.width() * 0.42,
+                    rect.top() + rect.height() * 0.42,
+                ),
+            );
+            line(
+                egui::pos2(
+                    rect.left() + rect.width() * 0.42,
+                    rect.top() + rect.height() * 0.42,
+                ),
+                egui::pos2(rect.left() + rect.width() * 0.42, rect.bottom()),
+            );
+            if matches!(style, CornerStyle::DoubleDoor) {
+                line(rect.right_top(), rect.left_bottom());
+            }
+        }
     }
 }
 
@@ -1144,7 +1224,7 @@ fn draw_properties_panel(
             egui::RichText::new("Properties")
                 .strong()
                 .size(16.0)
-                .color(theme::ink()),
+                .color(theme::heading()),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button("Close").clicked() {
@@ -1170,7 +1250,14 @@ fn draw_properties_panel(
                 ));
                 ui.separator();
             }
-            draw_properties(ui, commands, pieces, selection, target);
+            draw_properties(
+                ui,
+                commands,
+                pieces,
+                selection,
+                target,
+                &mut properties.materials_detail,
+            );
         });
 }
 
@@ -1294,6 +1381,7 @@ fn draw_properties(
     pieces: &mut Query<(Entity, &mut Furniture, &mut Transform)>,
     selection: &mut Selection,
     entity: Entity,
+    materials_detail: &mut bool,
 ) {
     let Ok((_, mut furniture, mut transform)) = pieces.get_mut(entity) else {
         return;
@@ -1464,6 +1552,35 @@ fn draw_properties(
                 furniture.dirty = true;
             }
         }
+        Kind::Corner { style } => {
+            ui.label(match style {
+                CornerStyle::ShelfDoors => {
+                    "L-shaped corner cabinet. Shelves sit in the corner, with a small door on each wall."
+                }
+                CornerStyle::DoubleDoor => {
+                    "L-shaped corner cabinet. Two hinged doors close the opening."
+                }
+            });
+            ui.label(
+                "Width runs along the back wall and depth along the left wall. Each arm is 350 mm deep, so the corner itself is deeper on the diagonal.",
+            );
+        }
+    }
+
+    if furniture.kind.has_doors() {
+        ui.horizontal(|ui| {
+            ui.label("Door face");
+            let solid = furniture.doors == DoorStyle::Solid;
+            if ui.selectable_label(solid, "Solid").clicked() && !solid {
+                furniture.doors = DoorStyle::Solid;
+                furniture.dirty = true;
+            }
+            let glass = furniture.doors == DoorStyle::Glass;
+            if ui.selectable_label(glass, "Glass").clicked() && !glass {
+                furniture.doors = DoorStyle::Glass;
+                furniture.dirty = true;
+            }
+        });
     }
 
     if furniture.kind.is_cabinet() {
@@ -1529,59 +1646,68 @@ fn draw_properties(
             egui::RichText::new("Materials & colors")
                 .strong()
                 .size(15.0)
-                .color(theme::ink()),
+                .color(theme::heading()),
         )
         .default_open(true)
         .show(ui, |ui| {
             if furniture.kind.is_cabinet() {
-                let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
-                for (index, label) in wall_names.into_iter().enumerate() {
-                    if finish_row(
-                        ui,
-                        (entity, "wall", index),
-                        label,
-                        &mut furniture.finishes.carcass[index],
-                    ) {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(materials_detail, false, "Body & fronts");
+                    ui.selectable_value(materials_detail, true, "Each board");
+                });
+                if *materials_detail {
+                    ui.label(
+                        egui::RichText::new("One colour for each board.")
+                            .size(12.0)
+                            .color(theme::muted()),
+                    );
+                    let wall_names = ["Left side", "Right side", "Bottom", "Top", "Back"];
+                    for (index, label) in wall_names.into_iter().enumerate() {
+                        if finish_row(ui, label, &mut furniture.finishes.carcass[index]) {
+                            furniture.dirty = true;
+                        }
+                    }
+                    let front_word = if matches!(furniture.kind, Kind::Drawers { .. }) {
+                        "Drawer"
+                    } else {
+                        "Door"
+                    };
+                    for index in 0..furniture.finishes.fronts.len() {
+                        if finish_row(
+                            ui,
+                            &format!("{front_word} {}", index + 1),
+                            &mut furniture.finishes.fronts[index],
+                        ) {
+                            furniture.dirty = true;
+                        }
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new(
+                            "Body is the carcass. Fronts are the doors and drawers.",
+                        )
+                        .size(12.0)
+                        .color(theme::muted()),
+                    );
+                    if finish_group(ui, "Body", &mut furniture.finishes.carcass)
+                        | finish_group(ui, "Fronts", &mut furniture.finishes.fronts)
+                    {
                         furniture.dirty = true;
                     }
                 }
-                for index in 0..furniture.finishes.fronts.len() {
-                    if finish_row(
-                        ui,
-                        (entity, "front", index),
-                        &format!("Front {}", index + 1),
-                        &mut furniture.finishes.fronts[index],
-                    ) {
-                        furniture.dirty = true;
-                    }
-                }
-                if finish_row(
-                    ui,
-                    (entity, "handle", 0),
-                    "Handles",
-                    &mut furniture.finishes.handles,
-                ) {
+                if finish_row(ui, "Handles", &mut furniture.finishes.handles) {
                     furniture.dirty = true;
                 }
             }
             if matches!(furniture.kind, Kind::Table)
-                && finish_row(
-                    ui,
-                    (entity, "frame", 0),
-                    if furniture.kind == Kind::Table {
-                        "Frame / legs"
-                    } else {
-                        "Block"
-                    },
-                    &mut furniture.finishes.carcass[0],
-                )
+                && finish_row(ui, "Frame / legs", &mut furniture.finishes.carcass[0])
             {
                 furniture.dirty = true;
             }
             if matches!(
                 furniture.kind,
                 Kind::Table | Kind::Countertop | Kind::Tabletop
-            ) && finish_row(ui, (entity, "top", 0), "Top", &mut furniture.finishes.top)
+            ) && finish_row(ui, "Top", &mut furniture.finishes.top)
             {
                 furniture.dirty = true;
             }
@@ -1621,40 +1747,95 @@ fn draw_properties(
     }
 }
 
-fn finish_row(
-    ui: &mut egui::Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    label: &str,
-    finish: &mut Finish,
-) -> bool {
+fn finish_group(ui: &mut egui::Ui, label: &str, parts: &mut [Finish]) -> bool {
+    if parts.is_empty() {
+        return false;
+    }
+    let uniform = parts.iter().all(|part| *part == parts[0]);
+    let title = if uniform {
+        label.to_owned()
+    } else {
+        format!("{label} · mixed")
+    };
+    let mut sample = parts[0];
+    let changed = finish_picker(ui, &title, &mut sample, uniform);
+    if changed {
+        parts.fill(sample);
+    }
+    changed
+}
+
+fn finish_row(ui: &mut egui::Ui, label: &str, finish: &mut Finish) -> bool {
+    finish_picker(ui, label, finish, true)
+}
+
+fn finish_picker(ui: &mut egui::Ui, label: &str, finish: &mut Finish, highlight: bool) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.add_sized([78.0, 18.0], egui::Label::new(label));
-        egui::ComboBox::from_id_salt(id)
-            .selected_text(finish_name(finish.preset))
-            .width(116.0)
-            .show_ui(ui, |ui| {
-                for preset in [
-                    FinishPreset::Oak,
-                    FinishPreset::Walnut,
-                    FinishPreset::White,
-                    FinishPreset::Charcoal,
-                    FinishPreset::StainlessSteel,
-                    FinishPreset::Custom,
-                ] {
-                    changed |= ui
-                        .selectable_value(&mut finish.preset, preset, finish_name(preset))
-                        .changed();
-                }
-            });
-        if finish.preset == FinishPreset::Custom {
-            changed |= ui.color_edit_button_srgb(&mut finish.color).changed();
-        } else {
-            let rgb = finish.rgb();
-            ui.colored_label(egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]), "■");
+    ui.label(egui::RichText::new(label).color(theme::muted()));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new("Paint")
+                .size(12.0)
+                .color(theme::heading()),
+        );
+        for preset in FinishPreset::PAINTS {
+            changed |= finish_swatch(ui, finish, preset, highlight);
         }
     });
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new("Wood")
+                .size(12.0)
+                .color(theme::heading()),
+        );
+        for preset in FinishPreset::WOODS {
+            changed |= finish_swatch(ui, finish, preset, highlight);
+        }
+    });
+    if highlight && finish.preset == FinishPreset::Custom {
+        ui.horizontal(|ui| {
+            ui.label("Custom");
+            changed |= ui.color_edit_button_srgb(&mut finish.color).changed();
+        });
+    }
     changed
+}
+
+fn finish_swatch(
+    ui: &mut egui::Ui,
+    finish: &mut Finish,
+    preset: FinishPreset,
+    highlight: bool,
+) -> bool {
+    let rgb = preset.rgb();
+    let fill = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+    let bright = rgb[0] as u16 + rgb[1] as u16 + rgb[2] as u16;
+    let text = if bright > 430 {
+        egui::Color32::from_rgb(28, 28, 30)
+    } else {
+        egui::Color32::WHITE
+    };
+    let selected = highlight && finish.preset == preset;
+    let response = ui.add(
+        egui::Button::new(egui::RichText::new(preset.label()).size(12.0).color(text))
+            .fill(fill)
+            .stroke(egui::Stroke::new(
+                if selected { 2.0 } else { 1.0 },
+                if selected {
+                    theme::heading()
+                } else {
+                    egui::Color32::from_rgb(20, 20, 22)
+                },
+            ))
+            .corner_radius(egui::CornerRadius::same(4)),
+    );
+    if response.clicked() && !selected {
+        finish.preset = preset;
+        finish.color = rgb;
+        true
+    } else {
+        false
+    }
 }
 
 fn appliance_finish_row(ui: &mut egui::Ui, finish: &mut Finish) -> bool {
@@ -1677,17 +1858,6 @@ fn appliance_finish_row(ui: &mut egui::Ui, finish: &mut Finish) -> bool {
         }
     });
     changed
-}
-
-fn finish_name(preset: FinishPreset) -> &'static str {
-    match preset {
-        FinishPreset::Oak => "Oak",
-        FinishPreset::Walnut => "Walnut",
-        FinishPreset::White => "White",
-        FinishPreset::Charcoal => "Charcoal",
-        FinishPreset::StainlessSteel => "Stainless",
-        FinishPreset::Custom => "Custom",
-    }
 }
 
 /// Pipes belong to the room, so clearing the furniture leaves them in place.

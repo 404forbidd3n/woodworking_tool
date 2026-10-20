@@ -1,14 +1,17 @@
 //! A small 3D layout tool for kitchens and other rooms, plus a sheet cutter.
 //!
-//! Run it with `cargo run`. The toolbar shows the open file and opens the
-//! cut planner. The sidebar holds the room, the furniture, and the selection.
+//! Run it with `cargo run`. The toolbar shows the open file and, in the
+//! center, the cut planner and the component planner. The sidebar holds the
+//! room, the furniture, and the selection.
 //!
 //! Where the code lives:
 //!
 //! - `layout` — the 3D room: data, drawing, and the sidebar
 //! - `cutting` — the separate window that nests parts on plywood
+//! - `builder` — the sketch window for a custom furniture block
 //! - `theme` — the shared colors, buttons, and section headers
 
+mod builder;
 mod cutting;
 mod layout;
 mod theme;
@@ -17,6 +20,10 @@ use bevy::prelude::*;
 use bevy::winit::WinitSettings;
 use bevy_egui::EguiPlugin;
 
+use crate::builder::{
+    on_window_closed as component_window_closed, open_requested as open_component,
+    ComponentPlan, ComponentPlannerPass, ComponentWindow,
+};
 use crate::cutting::{on_window_closed, open_requested, CutJob, CutPlannerPass, CutWindow};
 use crate::layout::edit::{
     finish_native_dialog, orbit_camera, pointer, shortcuts, sidebar, PropertiesUi, SidebarWidth,
@@ -40,6 +47,8 @@ fn main() {
         .insert_resource(ToolbarHeight::default())
         .insert_resource(CutJob::default())
         .insert_resource(CutWindow::default())
+        .insert_resource(ComponentPlan::default())
+        .insert_resource(ComponentWindow::default())
         .insert_resource(History::default())
         .insert_non_send(layout::project::NativeDialog::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -57,11 +66,13 @@ fn main() {
             Update,
             (
                 open_requested,
+                open_component,
                 finish_native_dialog,
                 pointer,
                 shortcuts,
                 orbit_camera,
                 on_window_closed,
+                component_window_closed,
             )
                 .chain(),
         )
@@ -70,6 +81,7 @@ fn main() {
             (layout::dimensions::draw_widths, sidebar).chain(),
         )
         .add_systems(CutPlannerPass, cutting::ui_draw)
+        .add_systems(ComponentPlannerPass, builder::ui_draw)
         // New boxes have to exist before transforms propagate, or a resized
         // cabinet would lag a frame behind its outline.
         .add_systems(PostUpdate, sync_meshes.before(TransformSystems::Propagate))

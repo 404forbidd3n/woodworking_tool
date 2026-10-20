@@ -123,10 +123,7 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
                 ui.separator();
                 draw_list_tabs(ui, job);
                 let group = job.list_group;
-                let showing = job
-                    .parts
-                    .iter()
-                    .any(|part| part.role.group() == group);
+                let showing = job.parts.iter().any(|part| part.role.group() == group);
                 if !showing {
                     let empty = match group {
                         CutListGroup::Doors => "No doors or drawer fronts yet.",
@@ -197,11 +194,7 @@ fn draw_draft(ui: &mut egui::Ui, job: &mut CutJob) {
 }
 
 fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
-    let doors = job
-        .parts
-        .iter()
-        .filter(|part| part.role.is_front())
-        .count();
+    let doors = job.parts.iter().filter(|part| part.role.is_front()).count();
     let carcass = job.parts.len() - doors;
     ui.horizontal(|ui| {
         ui.selectable_value(
@@ -216,7 +209,9 @@ fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
         );
     });
     let note = match job.list_group {
-        CutListGroup::Doors => "Doors and drawer fronts. These are often MDF, not the carcass sheet.",
+        CutListGroup::Doors => {
+            "Doors and drawer fronts. These are often MDF, not the carcass sheet."
+        }
         CutListGroup::Parts => "Sides, tops, bottoms, shelves, backs, and the rest of the carcass.",
     };
     ui.weak(note);
@@ -290,7 +285,11 @@ fn draw_canvas(ui: &mut egui::Ui, job: &mut CutJob) {
         }
     }
 
-    let sheet_count = job.estimate.as_ref().map(|estimate| estimate.sheets.len()).unwrap_or(0);
+    let sheet_count = job
+        .estimate
+        .as_ref()
+        .map(|estimate| estimate.sheets.len())
+        .unwrap_or(0);
     if sheet_count == 0 {
         return;
     }

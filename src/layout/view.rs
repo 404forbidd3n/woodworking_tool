@@ -13,7 +13,10 @@
 
 use std::collections::HashMap;
 
+use bevy::asset::RenderAssetUsages;
+use bevy::image::Image;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::layout::model::{
     example_layout, mm_to_m, read_project, resolve_layout_path, Editor, Finish, FinishPreset,
@@ -31,6 +34,7 @@ pub struct Palette {
     pub placeholder: Handle<StandardMaterial>,
     pub floor: Handle<StandardMaterial>,
     pub wall: Handle<StandardMaterial>,
+    pub glass: Handle<StandardMaterial>,
 }
 
 impl Palette {
@@ -51,6 +55,13 @@ impl Palette {
             placeholder: mat(materials, Color::srgb(0.55, 0.60, 0.64)),
             floor: mat(materials, Color::srgb(0.78, 0.76, 0.72)),
             wall: mat(materials, Color::srgb(0.92, 0.91, 0.88)),
+            glass: materials.add(StandardMaterial {
+                base_color: Color::srgba(0.72, 0.84, 0.90, 0.38),
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.06,
+                metallic: 0.05,
+                ..default()
+            }),
         }
     }
 
@@ -66,6 +77,7 @@ impl Palette {
             Surface::Pipe => self.handle.clone(),
             Surface::Floor => self.floor.clone(),
             Surface::Wall => self.wall.clone(),
+            Surface::Glass => self.glass.clone(),
         }
     }
 }
@@ -73,29 +85,111 @@ impl Palette {
 /// Reuses GPU materials across pieces that have the same visible finish.
 #[derive(Resource, Default)]
 pub struct MaterialCache {
-    entries: HashMap<([u8; 3], bool), Handle<StandardMaterial>>,
+    entries: HashMap<([u8; 3], [u8; 3], bool), Handle<StandardMaterial>>,
+    glass: Option<Handle<StandardMaterial>>,
 }
 
 impl MaterialCache {
     fn get(
         &mut self,
         materials: &mut Assets<StandardMaterial>,
+        images: &mut Assets<Image>,
         finish: Finish,
     ) -> Handle<StandardMaterial> {
         let rgb = finish.rgb();
         let metallic = finish.preset == FinishPreset::StainlessSteel;
+        let grain = if finish.preset.is_wood() {
+            finish.preset.grain()
+        } else {
+            rgb
+        };
+        let wood = finish.preset.is_wood();
         self.entries
-            .entry((rgb, metallic))
+            .entry((rgb, grain, metallic))
             .or_insert_with(|| {
+                let texture = wood.then(|| images.add(wood_grain(rgb, grain)));
                 materials.add(StandardMaterial {
-                    base_color: Color::srgb_u8(rgb[0], rgb[1], rgb[2]),
-                    perceptual_roughness: if metallic { 0.32 } else { 0.78 },
+                    base_color: if wood {
+                        Color::WHITE
+                    } else {
+                        Color::srgb_u8(rgb[0], rgb[1], rgb[2])
+                    },
+                    base_color_texture: texture,
+                    perceptual_roughness: if metallic {
+                        0.32
+                    } else if wood {
+                        0.62
+                    } else {
+                        0.78
+                    },
                     metallic: if metallic { 0.86 } else { 0.0 },
                     ..default()
                 })
             })
             .clone()
     }
+
+    fn glass(&mut self, materials: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
+        self.glass
+            .get_or_insert_with(|| {
+                materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.78, 0.88, 0.94, 0.34),
+                    alpha_mode: AlphaMode::Blend,
+                    perceptual_roughness: 0.04,
+                    metallic: 0.08,
+                    ..default()
+                })
+            })
+            .clone()
+    }
+}
+
+/// A small generated grain image. No external texture files: each wood is a
+/// pair of colors with vertical streaks and a few pores.
+fn wood_grain(base: [u8; 3], streak: [u8; 3]) -> Image {
+    let size = 96u32;
+    let mut data = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            let n = grain_hash(x, y);
+            let wander = (grain_hash(x / 4, 0) - 0.5) * 5.0;
+            let band = ((x as f32 + wander) * 0.42).sin();
+            let pore = if grain_hash(x / 2, y / 7) > 0.86 {
+                0.45
+            } else {
+                0.0
+            };
+            let mix = ((band * 0.5 + 0.5) * 0.7 + pore + (n - 0.5) * 0.12).clamp(0.0, 1.0);
+            let channel = |light: u8, dark: u8| {
+                (light as f32 + (dark as f32 - light as f32) * mix).round() as u8
+            };
+            data.extend_from_slice(&[
+                channel(base[0], streak[0]),
+                channel(base[1], streak[1]),
+                channel(base[2], streak[2]),
+                255,
+            ]);
+        }
+    }
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
+fn grain_hash(x: u32, y: u32) -> f32 {
+    let mut n = x
+        .wrapping_mul(374761393)
+        .wrapping_add(y.wrapping_mul(668265263));
+    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+    (n & 255) as f32 / 255.0
 }
 
 /// Angles for the modelling camera. The transform on the same entity is
@@ -261,6 +355,7 @@ pub(crate) fn placement_from_file(piece: PieceFile) -> (Furniture, Transform) {
     furniture.name = piece.name;
     furniture.placement = piece.placement;
     furniture.legs = piece.legs;
+    furniture.doors = piece.doors;
     furniture.finishes = piece.finishes;
     furniture.ensure_front_finishes();
     (
@@ -281,6 +376,7 @@ pub fn sync_meshes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut material_cache: ResMut<MaterialCache>,
     palette: Res<Palette>,
     mut room: ResMut<Room>,
@@ -295,6 +391,7 @@ pub fn sync_meshes(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &mut images,
                 &mut material_cache,
                 &palette,
                 root,
@@ -321,6 +418,7 @@ pub fn sync_meshes(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut images,
             &mut material_cache,
             &palette,
             entity,
@@ -426,6 +524,7 @@ fn replace_children(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
     material_cache: &mut MaterialCache,
     palette: &Palette,
     entity: Entity,
@@ -472,6 +571,7 @@ fn replace_children(
                 mesh,
                 material: surface_material(
                     materials,
+                    images,
                     material_cache,
                     palette,
                     furniture,
@@ -500,6 +600,7 @@ fn replace_children(
 
 fn surface_material(
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
     cache: &mut MaterialCache,
     palette: &Palette,
     furniture: Option<&Furniture>,
@@ -539,9 +640,10 @@ fn surface_material(
             }
             _ => return palette.handle(role),
         },
+        Surface::Glass => return cache.glass(materials),
         Surface::Floor | Surface::Wall => return palette.handle(role),
     };
-    cache.get(materials, finish)
+    cache.get(materials, images, finish)
 }
 
 /// Floor grid, a short axis marker at the back-left corner, and an outline
@@ -679,6 +781,7 @@ pub fn piece_file(furniture: &Furniture, transform: &Transform) -> PieceFile {
         turns: crate::layout::model::quarter_turns(transform.rotation),
         placement: furniture.placement,
         legs: furniture.legs,
+        doors: furniture.doors,
         finishes: furniture.finishes.clone(),
     }
 }

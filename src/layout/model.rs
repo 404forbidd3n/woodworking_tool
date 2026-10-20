@@ -92,6 +92,30 @@ pub enum Kind {
         #[serde(default)]
         color: PipeColor,
     },
+    /// An L-shaped cabinet that sits in a wall corner.
+    /// Width runs along the back wall and depth along the left wall.
+    Corner {
+        style: CornerStyle,
+    },
+}
+
+/// How a corner cabinet is closed. Both styles share the same L-shaped carcass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerStyle {
+    /// Two small doors, one on each wall, with shelves in the corner bay.
+    ShelfDoors,
+    /// Two hinged doors across the diagonal opening.
+    DoubleDoor,
+}
+
+/// Solid painted fronts, or a wood frame with a glass pane.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoorStyle {
+    #[default]
+    Solid,
+    Glass,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +189,18 @@ impl Kind {
             } => "Double Vertical Pipe",
             Kind::Pipe { count: 1, .. } => "Horizontal Pipe",
             Kind::Pipe { .. } => "Double Horizontal Pipe",
+            Kind::Corner {
+                style: CornerStyle::ShelfDoors,
+            } if placement == Placement::Wall => "Corner Wall Cabinet, Shelves",
+            Kind::Corner {
+                style: CornerStyle::DoubleDoor,
+            } if placement == Placement::Wall => "Corner Wall Cabinet, Double Door",
+            Kind::Corner {
+                style: CornerStyle::ShelfDoors,
+            } => "Corner Base Cabinet, Shelves",
+            Kind::Corner {
+                style: CornerStyle::DoubleDoor,
+            } => "Corner Base Cabinet, Double Door",
         }
     }
 
@@ -178,8 +214,13 @@ impl Kind {
             Kind::HingedDoors { doors } => doors.clamp(1, 2) as usize,
             Kind::LiftDoor => 1,
             Kind::SlidingDoors => 2,
+            Kind::Corner { .. } => 2,
             _ => 0,
         }
+    }
+
+    pub fn has_doors(self) -> bool {
+        self.front_count() > 0
     }
 
     pub fn is_appliance(self) -> bool {
@@ -207,6 +248,7 @@ impl Kind {
                 | Kind::LiftDoor
                 | Kind::SlidingDoors
                 | Kind::OpenShelves { .. }
+                | Kind::Corner { .. }
         )
     }
 
@@ -219,6 +261,15 @@ impl Kind {
                     (600.0, 720.0, 350.0, 1400.0)
                 } else {
                     (600.0, 720.0, 560.0, 0.0)
+                }
+            }
+            Kind::Corner { .. } => {
+                // 600 mm along each wall. The arms are 350 mm deep, so a 560 mm
+                // base depth would leave almost no opening on a 600 mm plan.
+                if placement == Placement::Wall {
+                    (600.0, 720.0, 600.0, 1400.0)
+                } else {
+                    (600.0, 720.0, 600.0, 0.0)
                 }
             }
             Kind::LiftDoor => (600.0, 400.0, 350.0, 1400.0),
@@ -338,6 +389,15 @@ pub enum FinishPreset {
     Charcoal,
     StainlessSteel,
     Custom,
+    Pine,
+    WhitePine,
+    Poplar,
+    Cherry,
+    Birch,
+    Blue,
+    NordicWhite,
+    MilitaryGreen,
+    Black,
 }
 
 /// A named material plus an editable fallback color. Materials are deliberately
@@ -355,14 +415,97 @@ impl Finish {
     }
 
     pub fn rgb(self) -> [u8; 3] {
-        match self.preset {
-            FinishPreset::Oak => [181, 137, 84],
-            FinishPreset::Walnut => [104, 70, 45],
-            FinishPreset::White => [238, 236, 229],
-            FinishPreset::Charcoal => [55, 58, 60],
-            FinishPreset::StainlessSteel => [165, 172, 175],
-            FinishPreset::Custom => self.color,
+        if self.preset == FinishPreset::Custom {
+            self.color
+        } else {
+            self.preset.rgb()
         }
+    }
+}
+
+impl FinishPreset {
+    pub const PAINTS: [Self; 4] = [
+        Self::Blue,
+        Self::NordicWhite,
+        Self::MilitaryGreen,
+        Self::Black,
+    ];
+    pub const WOODS: [Self; 7] = [
+        Self::Pine,
+        Self::Oak,
+        Self::Walnut,
+        Self::WhitePine,
+        Self::Poplar,
+        Self::Cherry,
+        Self::Birch,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Oak => "Oak",
+            Self::Walnut => "Walnut",
+            Self::White => "White",
+            Self::Charcoal => "Charcoal",
+            Self::StainlessSteel => "Stainless",
+            Self::Custom => "Custom",
+            Self::Pine => "Pine",
+            Self::WhitePine => "White pine",
+            Self::Poplar => "Poplar",
+            Self::Cherry => "Cherry",
+            Self::Birch => "Birch",
+            Self::Blue => "Blue",
+            Self::NordicWhite => "Nordic white",
+            Self::MilitaryGreen => "Military green",
+            Self::Black => "Black",
+        }
+    }
+
+    /// Flat color used for paint, and the light tone of a wood.
+    pub fn rgb(self) -> [u8; 3] {
+        match self {
+            Self::Oak => [196, 150, 92],
+            Self::Walnut => [112, 74, 46],
+            Self::White => [238, 236, 229],
+            Self::Charcoal => [55, 58, 60],
+            Self::StainlessSteel => [165, 172, 175],
+            Self::Custom => [180, 180, 180],
+            Self::Pine => [214, 176, 112],
+            Self::WhitePine => [232, 214, 184],
+            Self::Poplar => [206, 196, 156],
+            Self::Cherry => [166, 78, 58],
+            Self::Birch => [236, 220, 196],
+            Self::Blue => [48, 98, 168],
+            Self::NordicWhite => [247, 236, 214],
+            Self::MilitaryGreen => [74, 90, 58],
+            Self::Black => [22, 24, 26],
+        }
+    }
+
+    /// Darker streak laid over [`Self::rgb`] to fake grain. Paints return themselves.
+    pub fn grain(self) -> [u8; 3] {
+        match self {
+            Self::Oak => [132, 88, 46],
+            Self::Walnut => [62, 38, 24],
+            Self::Pine => [160, 112, 58],
+            Self::WhitePine => [186, 160, 122],
+            Self::Poplar => [168, 156, 118],
+            Self::Cherry => [108, 42, 34],
+            Self::Birch => [190, 166, 132],
+            other => other.rgb(),
+        }
+    }
+
+    pub fn is_wood(self) -> bool {
+        matches!(
+            self,
+            Self::Oak
+                | Self::Walnut
+                | Self::Pine
+                | Self::WhitePine
+                | Self::Poplar
+                | Self::Cherry
+                | Self::Birch
+        )
     }
 }
 
@@ -409,6 +552,8 @@ pub struct Furniture {
     pub name: String,
     pub placement: Placement,
     pub legs: LegStyle,
+    /// Solid or glass fronts. Drawers and open pieces ignore this.
+    pub doors: DoorStyle,
     pub width_mm: f32,
     pub height_mm: f32,
     pub depth_mm: f32,
@@ -433,6 +578,7 @@ impl Furniture {
             } else {
                 LegStyle::None
             },
+            doors: DoorStyle::Solid,
             width_mm,
             height_mm,
             depth_mm,
@@ -730,6 +876,8 @@ pub enum Surface {
     Appliance(u8),
     /// A round appliance part. Size uses diameter × height × diameter.
     ApplianceRound(u8),
+    /// A clear pane set into a door frame.
+    Glass,
     Leg(LegStyle),
     Pipe,
     Floor,
@@ -795,19 +943,23 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         }
         Kind::HingedDoors { doors } => {
             let mut parts = carcass(size);
-            parts.extend(hinged_fronts(size, doors.clamp(1, 2)));
+            if furniture.doors == DoorStyle::Glass {
+                parts.extend(open_shelves(size, 2));
+            }
+            parts.extend(hinged_fronts(size, doors.clamp(1, 2), furniture.doors));
             parts
         }
         Kind::LiftDoor => {
             let mut parts = carcass(size);
-            parts.extend(lift_front(size));
+            parts.extend(lift_front(size, furniture.doors));
             parts
         }
         Kind::SlidingDoors => {
             let mut parts = carcass(size);
-            parts.extend(sliding_fronts(size));
+            parts.extend(sliding_fronts(size, furniture.doors));
             parts
         }
+        Kind::Corner { style } => corner_cabinet(size, style, furniture.doors),
     };
     let leg_height = furniture.leg_height_meters();
     if leg_height > 0.0 {
@@ -955,7 +1107,7 @@ fn drawer_fronts(size: Vec3, count: u8) -> Vec<Solid> {
     parts
 }
 
-fn hinged_fronts(size: Vec3, doors: u8) -> Vec<Solid> {
+fn hinged_fronts(size: Vec3, doors: u8, style: DoorStyle) -> Vec<Solid> {
     let (w, h, d) = (size.x, size.y, size.z);
     let z = d * 0.5 + 0.004;
     let doors = doors.clamp(1, 2);
@@ -966,10 +1118,13 @@ fn hinged_fronts(size: Vec3, doors: u8) -> Vec<Solid> {
     for (index, (center_x, band_w)) in spans.into_iter().enumerate() {
         // `equal_spans` measures from the left edge. Shift onto the centered origin.
         let x = center_x - w * 0.5;
-        parts.push(Solid::axis(
-            Vec3::new(band_w, front_h, PANEL_METERS),
+        parts.extend(door_leaf(
+            band_w,
+            front_h,
             Vec3::new(x, center_y, z),
-            Surface::Front(index as u8),
+            Quat::IDENTITY,
+            style,
+            index as u8,
         ));
         // A single door gets the pull on the right. A pair gets pulls toward the middle.
         let pull_x = if doors == 1 {
@@ -990,7 +1145,7 @@ fn hinged_fronts(size: Vec3, doors: u8) -> Vec<Solid> {
 /// The lift-up door is rotated open around its top edge. Negative rotation
 /// around X swings the bottom of the door out toward +Z (into the room)
 /// and upward, which is the motion of a top-hinged door.
-fn lift_front(size: Vec3) -> Vec<Solid> {
+fn lift_front(size: Vec3, style: DoorStyle) -> Vec<Solid> {
     let (w, h, d) = (size.x, size.y, size.z);
     let front_h = (h - GAP_METERS * 2.0).max(0.02);
     let front_w = (w - GAP_METERS * 2.0).max(0.02);
@@ -999,23 +1154,17 @@ fn lift_front(size: Vec3) -> Vec<Solid> {
     let door_center = hinge + rotation * Vec3::new(0.0, -front_h * 0.5, 0.0);
     let handle_point =
         hinge + rotation * Vec3::new(0.0, -front_h + 0.04, PANEL_METERS * 0.5 + 0.004);
-    vec![
-        Solid {
-            size: Vec3::new(front_w, front_h, PANEL_METERS).max(Vec3::splat(0.001)),
-            translation: door_center,
-            rotation,
-            role: Surface::Front(0),
-        },
-        Solid {
-            size: Vec3::new(0.12, 0.012, 0.012),
-            translation: handle_point,
-            rotation,
-            role: Surface::Handle,
-        },
-    ]
+    let mut parts = door_leaf(front_w, front_h, door_center, rotation, style, 0);
+    parts.push(Solid {
+        size: Vec3::new(0.12, 0.012, 0.012),
+        translation: handle_point,
+        rotation,
+        role: Surface::Handle,
+    });
+    parts
 }
 
-fn sliding_fronts(size: Vec3) -> Vec<Solid> {
+fn sliding_fronts(size: Vec3, style: DoorStyle) -> Vec<Solid> {
     let (w, h, d) = (size.x, size.y, size.z);
     let front_h = (h - GAP_METERS * 2.0).max(0.02);
     // Each leaf is a little wider than half so they overlap, and one sits
@@ -1024,20 +1173,217 @@ fn sliding_fronts(size: Vec3) -> Vec<Solid> {
     let center_y = h * 0.5;
     let back_z = d * 0.5 + 0.002;
     let front_z = back_z + 0.012;
+    let mut parts = door_leaf(
+        leaf_w,
+        front_h,
+        Vec3::new(-w * 0.22, center_y, back_z),
+        Quat::IDENTITY,
+        style,
+        0,
+    );
+    parts.push(handle(
+        Vec3::new(-0.04, center_y, back_z + PANEL_METERS),
+        0.02,
+    ));
+    parts.extend(door_leaf(
+        leaf_w,
+        front_h,
+        Vec3::new(w * 0.22, center_y, front_z),
+        Quat::IDENTITY,
+        style,
+        1,
+    ));
+    parts.push(handle(
+        Vec3::new(0.04, center_y, front_z + PANEL_METERS),
+        0.02,
+    ));
+    parts
+}
+
+/// A solid slab, or a wood frame with a glass pane in the middle.
+/// Local X is the leaf width, local Y the height, and local +Z the outer face.
+fn door_leaf(
+    width: f32,
+    height: f32,
+    center: Vec3,
+    rotation: Quat,
+    style: DoorStyle,
+    index: u8,
+) -> Vec<Solid> {
+    let thickness = PANEL_METERS;
+    if style != DoorStyle::Glass {
+        return vec![Solid {
+            size: Vec3::new(width, height, thickness).max(Vec3::splat(0.001)),
+            translation: center,
+            rotation,
+            role: Surface::Front(index),
+        }];
+    }
+    let rail = 0.042_f32.min(width * 0.18).min(height * 0.18).max(0.008);
+    let frame = |sx: f32, sy: f32, ox: f32, oy: f32| Solid {
+        size: Vec3::new(sx, sy, thickness).max(Vec3::splat(0.001)),
+        translation: center + rotation * Vec3::new(ox, oy, 0.0),
+        rotation,
+        role: Surface::Front(index),
+    };
+    let inner_w = (width - rail * 2.0).max(0.01);
+    let inner_h = (height - rail * 2.0).max(0.01);
     vec![
-        Solid::axis(
-            Vec3::new(leaf_w, front_h, PANEL_METERS),
-            Vec3::new(-w * 0.22, center_y, back_z),
-            Surface::Front(0),
-        ),
-        handle(Vec3::new(-0.04, center_y, back_z + PANEL_METERS), 0.02),
-        Solid::axis(
-            Vec3::new(leaf_w, front_h, PANEL_METERS),
-            Vec3::new(w * 0.22, center_y, front_z),
-            Surface::Front(1),
-        ),
-        handle(Vec3::new(0.04, center_y, front_z + PANEL_METERS), 0.02),
+        frame(rail, height, -width * 0.5 + rail * 0.5, 0.0),
+        frame(rail, height, width * 0.5 - rail * 0.5, 0.0),
+        frame(inner_w, rail, 0.0, height * 0.5 - rail * 0.5),
+        frame(inner_w, rail, 0.0, -height * 0.5 + rail * 0.5),
+        Solid {
+            size: Vec3::new(inner_w, inner_h, 0.004),
+            translation: center + rotation * Vec3::new(0.0, 0.0, 0.002),
+            rotation,
+            role: Surface::Glass,
+        },
     ]
+}
+
+/// Depth of each straight run on a corner cabinet. The corner bay is this
+/// deep on both walls, so the diagonal is longer than either margin.
+fn corner_arm(size: Vec3) -> f32 {
+    0.35_f32.min(size.x * 0.62).min(size.z * 0.62)
+}
+
+fn corner_cabinet(size: Vec3, style: CornerStyle, doors: DoorStyle) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    let t = PANEL_METERS.min(w * 0.12).min(h * 0.12).min(d * 0.12);
+    let arm = corner_arm(size).max(t * 4.0);
+    let extra_w = (w - arm).max(0.04);
+    let extra_d = (d - arm).max(0.04);
+    let back_z = -d * 0.5 + arm * 0.5;
+    let left_x = -w * 0.5 + arm * 0.5;
+    let return_z = -d * 0.5 + arm + extra_d * 0.5;
+    let inner_h = (h - 2.0 * t).max(0.02);
+    let mut parts = vec![
+        Solid::axis(
+            Vec3::new(w, t, arm),
+            Vec3::new(0.0, t * 0.5, back_z),
+            Surface::Carcass(2),
+        ),
+        Solid::axis(
+            Vec3::new(arm, t, extra_d),
+            Vec3::new(left_x, t * 0.5, return_z),
+            Surface::Carcass(2),
+        ),
+        Solid::axis(
+            Vec3::new(w, t, arm),
+            Vec3::new(0.0, h - t * 0.5, back_z),
+            Surface::Carcass(3),
+        ),
+        Solid::axis(
+            Vec3::new(arm, t, extra_d),
+            Vec3::new(left_x, h - t * 0.5, return_z),
+            Surface::Carcass(3),
+        ),
+        Solid::axis(
+            Vec3::new((w - t).max(0.02), inner_h, t),
+            Vec3::new(t * 0.5, h * 0.5, -d * 0.5 + t * 0.5),
+            Surface::Carcass(4),
+        ),
+        Solid::axis(
+            Vec3::new(t, inner_h, (d - t).max(0.02)),
+            Vec3::new(-w * 0.5 + t * 0.5, h * 0.5, t * 0.5),
+            Surface::Carcass(0),
+        ),
+        Solid::axis(
+            Vec3::new(t, inner_h, (arm - t).max(0.02)),
+            Vec3::new(w * 0.5 - t * 0.5, h * 0.5, -d * 0.5 + (arm + t) * 0.5),
+            Surface::Carcass(1),
+        ),
+        Solid::axis(
+            Vec3::new((arm - t).max(0.02), inner_h, t),
+            Vec3::new(-w * 0.5 + (arm + t) * 0.5, h * 0.5, d * 0.5 - t * 0.5),
+            Surface::Carcass(1),
+        ),
+    ];
+
+    let door_h = (h - GAP_METERS * 2.0).max(0.04);
+    match style {
+        CornerStyle::ShelfDoors => {
+            for index in 1..=2 {
+                let y = t + inner_h * index as f32 / 3.0;
+                parts.push(Solid::axis(
+                    Vec3::new((arm - 2.0 * t).max(0.02), t, (arm - 2.0 * t).max(0.02)),
+                    Vec3::new(left_x, y, back_z),
+                    Surface::Carcass(2),
+                ));
+            }
+            let door_w = (extra_w - GAP_METERS * 2.0).max(0.04);
+            let door_x = -w * 0.5 + arm + extra_w * 0.5;
+            let door_z = -d * 0.5 + arm + 0.008;
+            parts.extend(door_leaf(
+                door_w,
+                door_h,
+                Vec3::new(door_x, h * 0.5, door_z),
+                Quat::IDENTITY,
+                doors,
+                0,
+            ));
+            parts.push(handle(
+                Vec3::new(door_x - door_w * 0.35, h * 0.5, door_z + PANEL_METERS),
+                0.08,
+            ));
+
+            let door_d = (extra_d - GAP_METERS * 2.0).max(0.04);
+            let side_x = -w * 0.5 + arm + 0.008;
+            let side_z = -d * 0.5 + arm + extra_d * 0.5;
+            // Face the left-wall run toward the room (+X).
+            let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+            parts.extend(door_leaf(
+                door_d,
+                door_h,
+                Vec3::new(side_x, h * 0.5, side_z),
+                rotation,
+                doors,
+                1,
+            ));
+            parts.push(Solid::axis(
+                Vec3::new(0.012, 0.012, 0.08),
+                Vec3::new(side_x + PANEL_METERS, h * 0.5, side_z - door_d * 0.35),
+                Surface::Handle,
+            ));
+        }
+        CornerStyle::DoubleDoor => {
+            let ax = w * 0.5;
+            let az = -d * 0.5 + arm;
+            let bx = -w * 0.5 + arm;
+            let bz = d * 0.5;
+            let dx = bx - ax;
+            let dz = bz - az;
+            let length = (dx * dx + dz * dz).sqrt().max(0.05);
+            let along_x = dx / length;
+            let along_z = dz / length;
+            // Points out of the cabinet, into the room.
+            let nx = along_z;
+            let nz = -along_x;
+            let leaf_w = (length * 0.5 - GAP_METERS).max(0.04);
+            let shift = leaf_w * 0.5 + GAP_METERS * 0.5;
+            let rotation = Quat::from_rotation_y((-along_z).atan2(along_x));
+            let mid_x = (ax + bx) * 0.5 + nx * 0.012;
+            let mid_z = (az + bz) * 0.5 + nz * 0.012;
+            for (index, sign) in [(0u8, -1.0_f32), (1, 1.0)] {
+                let center = Vec3::new(
+                    mid_x + along_x * shift * sign,
+                    h * 0.5,
+                    mid_z + along_z * shift * sign,
+                );
+                parts.extend(door_leaf(leaf_w, door_h, center, rotation, doors, index));
+                let handle_along = -sign * (leaf_w * 0.5 - 0.05);
+                parts.push(Solid::axis(
+                    Vec3::new(0.016, 0.09, 0.016),
+                    center
+                        + Vec3::new(along_x, 0.0, along_z) * handle_along
+                        + Vec3::new(nx, 0.0, nz) * 0.02,
+                    Surface::Handle,
+                ));
+            }
+        }
+    }
+    parts
 }
 
 fn handle(at: Vec3, width: f32) -> Solid {
@@ -1654,6 +2000,8 @@ pub struct PieceFile {
     #[serde(default)]
     pub legs: LegStyle,
     #[serde(default)]
+    pub doors: DoorStyle,
+    #[serde(default)]
     pub finishes: PartFinishes,
 }
 
@@ -2088,5 +2436,85 @@ mod tests {
                 color: PipeColor::Gray
             }
         );
+    }
+
+    #[test]
+    fn corner_shelf_cabinet_has_two_doors_and_shelves() {
+        let furniture = Furniture::new(
+            Kind::Corner {
+                style: CornerStyle::ShelfDoors,
+            },
+            600.0,
+            720.0,
+            600.0,
+        );
+        let parts = solids(&furniture);
+        let fronts = parts
+            .iter()
+            .filter(|solid| matches!(solid.role, Surface::Front(_)))
+            .count();
+        assert_eq!(fronts, 2);
+        let shelves = parts
+            .iter()
+            .filter(|solid| {
+                solid.role == Surface::Carcass(2) && solid.size.x < 0.4 && solid.size.z < 0.4
+            })
+            .count();
+        assert!(shelves >= 2, "{shelves}");
+    }
+
+    #[test]
+    fn corner_double_door_spans_the_opening() {
+        let furniture = Furniture::new(
+            Kind::Corner {
+                style: CornerStyle::DoubleDoor,
+            },
+            600.0,
+            720.0,
+            600.0,
+        );
+        let parts = solids(&furniture);
+        let fronts: Vec<_> = parts
+            .into_iter()
+            .filter(|solid| matches!(solid.role, Surface::Front(_)))
+            .collect();
+        assert_eq!(fronts.len(), 2);
+        let delta = fronts[1].translation - fronts[0].translation;
+        assert!(delta.x.abs() > 0.05);
+        assert!(delta.z.abs() > 0.05);
+        assert_ne!(fronts[0].rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn glass_door_adds_a_pane_inside_a_frame() {
+        let mut furniture = Furniture::new(Kind::HingedDoors { doors: 1 }, 600.0, 720.0, 560.0);
+        furniture.doors = DoorStyle::Glass;
+        let parts = solids(&furniture);
+        assert!(parts.iter().any(|solid| solid.role == Surface::Glass));
+        assert!(
+            parts
+                .iter()
+                .filter(|solid| matches!(solid.role, Surface::Front(_)))
+                .count()
+                >= 4
+        );
+    }
+
+    #[test]
+    fn older_pieces_load_with_solid_doors() {
+        let piece: PieceFile = serde_json::from_str(
+            r#"{
+                "kind": {"type": "hinged_doors", "doors": 2},
+                "width_mm": 600.0,
+                "height_mm": 720.0,
+                "depth_mm": 560.0,
+                "x_mm": 0.0,
+                "y_mm": 0.0,
+                "z_mm": 0.0,
+                "turns": 0
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(piece.doors, DoorStyle::Solid);
     }
 }
