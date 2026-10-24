@@ -356,6 +356,7 @@ pub(crate) fn placement_from_file(piece: PieceFile) -> (Furniture, Transform) {
     furniture.placement = piece.placement;
     furniture.legs = piece.legs;
     furniture.doors = piece.doors;
+    furniture.custom = piece.custom;
     furniture.finishes = piece.finishes;
     furniture.ensure_front_finishes();
     (
@@ -782,6 +783,7 @@ pub fn piece_file(furniture: &Furniture, transform: &Transform) -> PieceFile {
         placement: furniture.placement,
         legs: furniture.legs,
         doors: furniture.doors,
+        custom: furniture.custom.clone(),
         finishes: furniture.finishes.clone(),
     }
 }

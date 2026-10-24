@@ -5,7 +5,8 @@
 //! small gap already used on the fronts, and no hardware.
 
 use crate::layout::model::{
-    equal_spans, m_to_mm, mm_to_m, CornerStyle, Furniture, Kind, GAP_METERS, PANEL_METERS,
+    equal_spans, m_to_mm, mm_to_m, CornerStyle, CustomRole, Furniture, Kind, GAP_METERS,
+    PANEL_METERS,
 };
 
 use super::job::{CutPart, PartRole};
@@ -57,6 +58,7 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
             cabinet(name, width, height, depth, panel, furniture.kind, 1)
         }
         Kind::Corner { style } => corner_parts(name, width, height, depth, style),
+        Kind::Custom => custom_parts(name, furniture),
         Kind::Refrigerator
         | Kind::Dishwasher
         | Kind::ElectricOven
@@ -128,6 +130,34 @@ fn corner_parts(
         }
     }
     parts
+}
+
+fn custom_parts(name: &str, furniture: &Furniture) -> Vec<CutPart> {
+    let Some(block) = furniture.custom.as_ref() else {
+        return Vec::new();
+    };
+    block
+        .scaled_solids(furniture.width_mm, furniture.height_mm, furniture.depth_mm)
+        .into_iter()
+        .zip(block.boards.iter())
+        .map(|(solid, board)| {
+            let mut span = [
+                m_to_mm(solid.size.x),
+                m_to_mm(solid.size.y),
+                m_to_mm(solid.size.z),
+            ];
+            span.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+            let role = match board.role {
+                CustomRole::Door => PartRole::Door,
+                CustomRole::Bottom => PartRole::Bottom,
+                CustomRole::Top => PartRole::Top,
+                CustomRole::Wall => PartRole::Side,
+                CustomRole::Back => PartRole::Back,
+                CustomRole::Plank => PartRole::Shelf,
+            };
+            named(name, role, span[0].max(1.0), span[1].max(1.0), 1)
+        })
+        .collect()
 }
 
 fn cabinet(

@@ -11,7 +11,7 @@ use bevy::window::{PrimaryWindow, RequestRedraw};
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 
-use crate::builder::{self, ComponentWindow};
+use crate::builder::{self, ComponentWindow, CustomLibrary};
 use crate::cutting::{self, CutJob, CutWindow};
 use crate::theme::{self, dropdown, toolbar_frame};
 
@@ -19,8 +19,8 @@ use crate::layout::history::History;
 use crate::layout::model::{
     example_layout, m_to_mm, mm_to_m, pick_bounds, place, quarter_turns, ray_aabb,
     ray_horizontal_plane, read_project, resolve_layout_path, rotation_from_turns,
-    sanitize_openings, snap_to_step, write_project, CornerStyle, DoorStyle, Editor, Finish,
-    FinishPreset, Furniture, Kind, LegStyle, Opening, OpeningKind, PipeColor, Placement,
+    sanitize_openings, snap_to_step, write_project, CornerStyle, CustomType, DoorStyle, Editor,
+    Finish, FinishPreset, Furniture, Kind, LegStyle, Opening, OpeningKind, PipeColor, Placement,
     ProjectFile, ReadError, Room, Selection, WallSide, PIPE_PAIR_GAP_MM,
 };
 use crate::layout::project::{self, DialogRequest, NativeDialog};
@@ -105,6 +105,10 @@ pub fn pointer(
     sidebar: Res<SidebarWidth>,
     toolbar: Res<ToolbarHeight>,
 ) {
+    let primary_cursor = window
+        .iter()
+        .next()
+        .and_then(|primary| primary.cursor_position());
     if drag.mode_is_active() {
         let Some(button) = drag.button else {
             drag.reset();
@@ -169,6 +173,12 @@ pub fn pointer(
                 }
             }
         }
+        return;
+    }
+
+    // A click in the component planner must not also grab the room. The
+    // primary window has no cursor while the pointer is over the other window.
+    if primary_cursor.is_none() {
         return;
     }
 
@@ -290,7 +300,12 @@ pub fn shortcuts(
     window: Query<&Window, With<PrimaryWindow>>,
 ) {
     // Number fields use the arrow keys. Don't also nudge a cabinet.
-    if egui.wants_any_keyboard_input() || over_chrome(&window, &sidebar, &toolbar, &properties) {
+    // Keys typed in the component planner belong to that window.
+    let main_focused = window.iter().next().is_some_and(|window| window.focused);
+    if !main_focused
+        || egui.wants_any_keyboard_input()
+        || over_chrome(&window, &sidebar, &toolbar, &properties)
+    {
         return;
     }
 
@@ -413,7 +428,14 @@ pub fn orbit_camera(
         return;
     };
 
-    if !over_chrome(&window, &sidebar, &toolbar, &properties) && !egui.wants_any_pointer_input() {
+    let cursor_here = window
+        .iter()
+        .next()
+        .and_then(|primary| primary.cursor_position());
+    if cursor_here.is_some()
+        && !over_chrome(&window, &sidebar, &toolbar, &properties)
+        && !egui.wants_any_pointer_input()
+    {
         let lines = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y,
             MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
@@ -458,6 +480,7 @@ pub fn sidebar(
     mut cut_job: ResMut<CutJob>,
     mut cut_window: ResMut<CutWindow>,
     mut component_window: ResMut<ComponentWindow>,
+    library: Res<CustomLibrary>,
     mut history: ResMut<History>,
     mut dialogs: NonSendMut<NativeDialog>,
 ) {
@@ -775,6 +798,22 @@ pub fn sidebar(
                             let entity =
                                 add_piece(&mut commands, &room, kind, Placement::Wall, existing);
                             selection.set_only(entity);
+                        }
+                    }
+                });
+
+                dropdown(ui, "Customs", false, |ui| {
+                    if library.types.is_empty() {
+                        ui.label(
+                            "Save a block in the Component planner and it will be listed here.",
+                        );
+                    } else {
+                        let existing = pieces.iter().len();
+                        for block in &library.types {
+                            if library_button(ui, block.name.as_str(), Kind::Custom).clicked() {
+                                let entity = add_custom(&mut commands, &room, block, existing);
+                                selection.set_only(entity);
+                            }
                         }
                     }
                 });
@@ -1207,6 +1246,20 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 line(rect.right_top(), rect.left_bottom());
             }
         }
+        Kind::Custom => {
+            line(
+                egui::pos2(rect.left() + 4.0, rect.bottom() - 4.0),
+                egui::pos2(rect.right() - 4.0, rect.bottom() - 4.0),
+            );
+            line(
+                egui::pos2(rect.left() + 4.0, rect.top() + 4.0),
+                egui::pos2(rect.left() + 4.0, rect.bottom() - 4.0),
+            );
+            line(
+                egui::pos2(rect.left() + 8.0, rect.center().y),
+                egui::pos2(rect.right() - 6.0, rect.center().y),
+            );
+        }
     }
 }
 
@@ -1335,6 +1388,29 @@ fn add_piece(
         room.depth_mm * 0.55
     };
     commands.spawn((furniture, place(x_mm, y_mm, z_mm, 0))).id()
+}
+
+fn add_custom(
+    commands: &mut Commands,
+    room: &Room,
+    block: &CustomType,
+    already_there: usize,
+) -> Entity {
+    let mut furniture = Furniture::new(
+        Kind::Custom,
+        block.width_mm,
+        block.height_mm,
+        block.depth_mm,
+    );
+    furniture.name = block.name.clone();
+    furniture.custom = Some(block.clone());
+    furniture.placement = Placement::Floor;
+    furniture.legs = LegStyle::Plastic100;
+    furniture.ensure_front_finishes();
+    let column = (already_there % 4) as f32;
+    let x_mm = room.width_mm * 0.5 + (column - 1.5) * 180.0;
+    let z_mm = room.depth_mm * 0.55;
+    commands.spawn((furniture, place(x_mm, 0.0, z_mm, 0))).id()
 }
 
 fn draw_pipe_size(ui: &mut egui::Ui, furniture: &mut Furniture) {
@@ -1565,6 +1641,11 @@ fn draw_properties(
                 "Width runs along the back wall and depth along the left wall. Each arm is 350 mm deep, so the corner itself is deeper on the diagonal.",
             );
         }
+        Kind::Custom => {
+            ui.label(
+                "Custom block. Width, height, and depth scale every board together. Each board keeps its own size.",
+            );
+        }
     }
 
     if furniture.kind.has_doors() {
@@ -1650,7 +1731,18 @@ fn draw_properties(
         )
         .default_open(true)
         .show(ui, |ui| {
-            if furniture.kind.is_cabinet() {
+            if furniture.kind == Kind::Custom {
+                ui.label(
+                    egui::RichText::new("Body colours every board except the doors.")
+                        .size(12.0)
+                        .color(theme::muted()),
+                );
+                if finish_group(ui, "Body", &mut furniture.finishes.carcass)
+                    | finish_group(ui, "Fronts", &mut furniture.finishes.fronts)
+                {
+                    furniture.dirty = true;
+                }
+            } else if furniture.kind.is_cabinet() {
                 ui.horizontal(|ui| {
                     ui.selectable_value(materials_detail, false, "Body & fronts");
                     ui.selectable_value(materials_detail, true, "Each board");

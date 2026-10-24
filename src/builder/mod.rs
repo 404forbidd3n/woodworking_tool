@@ -1,18 +1,30 @@
-//! A sketch for building a furniture block from loose boards.
+//! The component planner builds a furniture type from loose boards in 3D.
 //!
-//! This is not a finished builder. It remembers a few named blocks and draws
-//! a front view so the idea is visible. Joining the boards, saving them, and
-//! placing the block in the room come later.
+//! A saved type is written to `customs.json` in the project folder and listed
+//! in the Customs section of the room. Width, height, and depth on a placed
+//! piece scale every board together.
 
+mod scene;
 mod ui;
 
-use bevy::camera::{ClearColorConfig, RenderTarget};
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::RenderTarget;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 use bevy_egui::EguiSchedule;
 
+use crate::layout::model::{project_dir, CustomBoard, CustomType};
+
+pub use scene::{
+    configure_gizmos, draw_stage, nudge_selection, pointer, sync_preview, BuilderGizmos,
+};
 pub use ui::draw as ui_draw;
+
+/// The builder is drawn on this layer so it stays out of the room camera.
+pub const BUILDER_LAYER: usize = 1;
+/// Parked away from the room as well, in case a mesh misses its layer.
+pub const BUILDER_OFFSET: Vec3 = Vec3::new(40.0, 0.0, 0.0);
 
 /// Runs only for the component planner window.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
@@ -24,11 +36,28 @@ pub struct ComponentPlannerWindow;
 #[derive(Component)]
 pub struct ComponentPlannerCamera;
 
-#[derive(Resource, Default)]
+#[derive(Component)]
+pub struct BuilderPreview;
+
+#[derive(Resource)]
 pub struct ComponentWindow {
     window: Option<Entity>,
     camera: Option<Entity>,
+    preview: Option<Entity>,
+    light: Option<Entity>,
     requested: bool,
+}
+
+impl Default for ComponentWindow {
+    fn default() -> Self {
+        Self {
+            window: None,
+            camera: None,
+            preview: None,
+            light: None,
+            requested: false,
+        }
+    }
 }
 
 pub fn request_open(state: &mut ComponentWindow) {
@@ -38,6 +67,7 @@ pub fn request_open(state: &mut ComponentWindow) {
 pub fn open_requested(
     mut commands: Commands,
     mut state: ResMut<ComponentWindow>,
+    mut plan: ResMut<ComponentPlan>,
     windows: Query<Entity, With<ComponentPlannerWindow>>,
 ) {
     if !state.requested {
@@ -50,7 +80,7 @@ pub fn open_requested(
         }
     }
     let mut resolution = bevy::window::WindowResolution::default();
-    resolution.set(1100.0, 760.0);
+    resolution.set(1280.0, 800.0);
     let window = commands
         .spawn((
             Window {
@@ -61,21 +91,62 @@ pub fn open_requested(
             ComponentPlannerWindow,
         ))
         .id();
+    let orbit = plan.orbit;
     let camera = commands
         .spawn((
-            ComponentPlannerCamera,
-            Camera2d,
+            Camera3d::default(),
             Camera {
                 order: 2,
-                clear_color: ClearColorConfig::Custom(Color::srgb(0.73, 0.70, 0.64)),
                 ..default()
             },
+            orbit.pose(),
+            ComponentPlannerCamera,
+            RenderLayers::layer(BUILDER_LAYER),
             RenderTarget::Window(WindowRef::Entity(window)),
             EguiSchedule::new(ComponentPlannerPass),
         ))
         .id();
+    let preview = commands
+        .spawn((
+            BuilderPreview,
+            Name::new("Custom block"),
+            Transform::from_translation(BUILDER_OFFSET),
+            Visibility::default(),
+            RenderLayers::layer(BUILDER_LAYER),
+        ))
+        .id();
+    let light = commands
+        .spawn((
+            Transform::from_translation(BUILDER_OFFSET),
+            Visibility::default(),
+            RenderLayers::layer(BUILDER_LAYER),
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                DirectionalLight {
+                    illuminance: 11000.0,
+                    shadow_maps_enabled: true,
+                    ..default()
+                },
+                Transform::from_xyz(2.2, 3.6, 1.6).looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y),
+                RenderLayers::layer(BUILDER_LAYER),
+            ));
+            parent.spawn((
+                DirectionalLight {
+                    illuminance: 3500.0,
+                    shadow_maps_enabled: false,
+                    ..default()
+                },
+                Transform::from_xyz(-1.6, 2.2, 2.4).looking_at(Vec3::new(0.0, 0.35, 0.0), Vec3::Y),
+                RenderLayers::layer(BUILDER_LAYER),
+            ));
+        })
+        .id();
     state.window = Some(window);
     state.camera = Some(camera);
+    state.preview = Some(preview);
+    state.light = Some(light);
+    plan.mesh_dirty = true;
 }
 
 pub fn on_window_closed(
@@ -88,114 +159,214 @@ pub fn on_window_closed(
             if let Some(camera) = state.camera.take() {
                 commands.entity(camera).despawn();
             }
+            if let Some(preview) = state.preview.take() {
+                commands.entity(preview).despawn();
+            }
+            if let Some(light) = state.light.take() {
+                commands.entity(light).despawn();
+            }
             state.window = None;
         }
     }
 }
 
-/// One board in a sketched block. Sizes are stored only so the sketch can
-/// label them. They do not cut a sheet and they do not build a 3D piece.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BoardRole {
-    Wall,
-    Door,
-    Bottom,
-    Top,
-    Back,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum DragKind {
+    #[default]
+    Idle,
+    Orbit,
+    Pan,
+    Move,
 }
 
-impl BoardRole {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Wall => "Wall",
-            Self::Door => "Door",
-            Self::Bottom => "Bottom",
-            Self::Top => "Top",
-            Self::Back => "Back",
-        }
-    }
-
-    fn default_size(self) -> (f32, f32) {
-        match self {
-            Self::Wall => (18.0, 720.0),
-            Self::Door => (564.0, 684.0),
-            Self::Bottom | Self::Top => (564.0, 18.0),
-            Self::Back => (564.0, 684.0),
-        }
-    }
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BuilderDrag {
+    pub kind: DragKind,
+    pub button: MouseButton,
+    pub moved: f32,
+    pub index: Option<usize>,
+    pub start_mm: Vec3,
+    pub hit: Vec3,
+    pub plane_y: f32,
+    pub cursor: Vec2,
+    pub lift_mm: f32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct SketchBoard {
-    pub role: BoardRole,
-    pub width_mm: f32,
-    pub height_mm: f32,
-}
-
-impl SketchBoard {
-    pub fn new(role: BoardRole) -> Self {
-        let (width_mm, height_mm) = role.default_size();
+impl Default for BuilderDrag {
+    fn default() -> Self {
         Self {
-            role,
-            width_mm,
-            height_mm,
+            kind: DragKind::Idle,
+            button: MouseButton::Left,
+            moved: 0.0,
+            index: None,
+            start_mm: Vec3::ZERO,
+            hit: Vec3::ZERO,
+            plane_y: 0.0,
+            cursor: Vec2::ZERO,
+            lift_mm: 0.0,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct BlockSketch {
-    pub name: String,
-    pub boards: Vec<SketchBoard>,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BuilderOrbit {
+    pub focus: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
 }
 
-impl BlockSketch {
-    pub fn sample() -> Self {
+impl Default for BuilderOrbit {
+    fn default() -> Self {
         Self {
-            name: "Base block".into(),
-            boards: vec![
-                SketchBoard::new(BoardRole::Wall),
-                SketchBoard::new(BoardRole::Wall),
-                SketchBoard::new(BoardRole::Bottom),
-                SketchBoard::new(BoardRole::Top),
-                SketchBoard::new(BoardRole::Door),
-            ],
+            focus: BUILDER_OFFSET + Vec3::Y * 0.4,
+            yaw: 2.2,
+            pitch: 0.55,
+            distance: 2.6,
         }
     }
 }
 
-/// The blocks being sketched. Nothing here is written into the project file.
-#[derive(Resource, Clone, Debug)]
+impl BuilderOrbit {
+    pub fn pose(self) -> Transform {
+        let pitch = self.pitch.clamp(0.08, 1.45);
+        let horizontal = self.distance * pitch.cos();
+        let eye = self.focus
+            + Vec3::new(
+                horizontal * self.yaw.cos(),
+                self.distance * pitch.sin(),
+                horizontal * self.yaw.sin(),
+            );
+        Transform::from_translation(eye).looking_at(self.focus, Vec3::Y)
+    }
+}
+
+/// The block currently being edited. It is not in the room until it is saved
+/// and then chosen from Customs.
+#[derive(Resource)]
 pub struct ComponentPlan {
-    pub blocks: Vec<BlockSketch>,
-    pub selected: usize,
+    pub name: String,
+    pub boards: Vec<CustomBoard>,
+    pub selected: Option<usize>,
+    pub mesh_dirty: bool,
+    pub status: String,
+    pub(crate) drag: BuilderDrag,
+    pub(crate) orbit: BuilderOrbit,
 }
 
 impl Default for ComponentPlan {
     fn default() -> Self {
         Self {
-            blocks: vec![BlockSketch::sample()],
-            selected: 0,
+            name: "New block".into(),
+            boards: Vec::new(),
+            selected: None,
+            mesh_dirty: true,
+            status: String::new(),
+            drag: BuilderDrag::default(),
+            orbit: BuilderOrbit::default(),
         }
     }
 }
 
 impl ComponentPlan {
-    pub fn selected_mut(&mut self) -> &mut BlockSketch {
-        if self.blocks.is_empty() {
-            self.blocks.push(BlockSketch::sample());
-            self.selected = 0;
+    pub fn load_type(&mut self, block: &CustomType) {
+        self.name = block.name.clone();
+        self.boards = block.boards.clone();
+        self.selected = None;
+        self.mesh_dirty = true;
+        self.status = format!("Editing {}", block.name);
+    }
+}
+
+/// Saved custom types. `customs.json` lives next to the program and is
+/// gitignored with the other project files.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct CustomLibrary {
+    pub types: Vec<CustomType>,
+}
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct BuilderChrome {
+    pub sidebar: f32,
+    pub toolbar: f32,
+}
+
+impl Default for BuilderChrome {
+    fn default() -> Self {
+        Self {
+            sidebar: 360.0,
+            toolbar: 48.0,
         }
-        self.selected = self.selected.min(self.blocks.len() - 1);
-        &mut self.blocks[self.selected]
+    }
+}
+
+impl CustomLibrary {
+    pub fn load() -> Self {
+        let path = customs_path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        let Ok(file) = serde_json::from_str::<CustomLibraryFile>(&text) else {
+            return Self::default();
+        };
+        let mut library = Self { types: file.types };
+        for block in &mut library.types {
+            block.sanitize();
+        }
+        library
     }
 
-    pub fn add_block(&mut self) {
-        let number = self.blocks.len() + 1;
-        self.blocks.push(BlockSketch {
-            name: format!("Block {number}"),
-            boards: Vec::new(),
-        });
-        self.selected = self.blocks.len() - 1;
+    pub fn save_plan(&mut self, plan: &mut ComponentPlan) {
+        let name = plan.name.trim();
+        if name.is_empty() {
+            plan.status = "Name the block before saving.".into();
+            return;
+        }
+        if plan.boards.is_empty() {
+            plan.status = "Add a board before saving.".into();
+            return;
+        }
+        let mut block = CustomType {
+            name: name.to_owned(),
+            boards: plan.boards.clone(),
+            width_mm: 1.0,
+            height_mm: 1.0,
+            depth_mm: 1.0,
+        };
+        block.sanitize();
+        plan.name = block.name.clone();
+        if let Some(existing) = self.types.iter_mut().find(|saved| saved.name == block.name) {
+            *existing = block;
+            plan.status = format!("Updated {}.", plan.name);
+        } else {
+            plan.status = format!("Saved {}.", block.name);
+            self.types.push(block);
+        }
+        if let Err(error) = self.write() {
+            plan.status = format!("Could not save ({error}).");
+        }
     }
+
+    fn write(&self) -> std::io::Result<()> {
+        let file = CustomLibraryFile {
+            types: self.types.clone(),
+        };
+        let text = serde_json::to_string_pretty(&file).unwrap_or_else(|_| "{}".into());
+        std::fs::write(customs_path(), text)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CustomLibraryFile {
+    types: Vec<CustomType>,
+}
+
+use serde::{Deserialize, Serialize};
+
+fn customs_path() -> std::path::PathBuf {
+    project_dir().join("customs.json")
+}
+
+pub fn load_saved(mut library: ResMut<CustomLibrary>) {
+    *library = CustomLibrary::load();
 }

@@ -9,8 +9,8 @@ kitchens, cabinets, furniture, and simple rooms. It combines:
 - configurable cabinet and appliance models;
 - project files that can be shared and reopened;
 - a separate two-dimensional sheet-cut planner;
-- a sketch window for trying a custom furniture block before it becomes a
-  real catalog piece.
+- a 3D component planner for building a custom furniture type from loose
+  boards and saving it into the room.
 
 The application is written in Rust with Bevy and egui. Dimensions shown to the
 user are millimetres; the renderer uses metres internally.
@@ -43,7 +43,7 @@ The toolbar displays the active project filename and provides:
 - **Save As** — select a new JSON filename and location;
 - **Cut planner** and **Component planner** — two large buttons centered on the
   toolbar. Cut planner opens the sheet-layout window. Component planner opens
-  a sketch window for a custom block;
+  the 3D block builder;
 - **Undo** and **Redo** — restore recent layout edits. Load, Save, and Save As
   stay on the right.
 
@@ -65,10 +65,11 @@ Sections include:
 1. View — camera buttons, plus the snap checkbox and step
 2. Room
 3. Add Furniture
-4. Add Surfaces
-5. Add Appliances
-6. In the room
-7. Selected
+4. Customs — saved custom furniture types, separate from the floor and wall lists
+5. Add Surfaces
+6. Add Appliances
+7. In the room
+8. Selected
 
 Load, Save, and Save As live only on the toolbar. Properties opens as a docked
 panel beside the sidebar, at about 680 logical pixels so the paint and wood
@@ -333,8 +334,8 @@ A project stores:
   lock, and openings;
 - snap settings;
 - furniture and pipe kind, name, dimensions, position, facing, placement, legs,
-  door face, and finishes (a pipe's orientation, count, and color are part of
-  its kind);
+  door face, finishes, and, for a custom block, the boards it was built from
+  (a pipe's orientation, count, and color are part of its kind);
 - cut-planner board settings, draft values, and parts.
 
 The application reads versions 1, 2, and 3.
@@ -354,7 +355,8 @@ Migration rules:
   and black are extra finish names on the same file version. Older files keep
   the finishes they already stored.
 
-The component planner is not written into the project file.
+A custom piece stores its boards in the project file, so the room still opens
+if `customs.json` is missing. The Customs list itself comes from `customs.json`.
 
 Relative paths resolve inside the project directory. Native dialogs may select
 files elsewhere. Load and Save As open those dialogs without stopping the
@@ -403,7 +405,10 @@ Parts can be entered manually or imported from furniture in the room.
 Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
 A corner cabinet contributes an approximate list: sides, top, bottom, back,
 two doors, and, for the shelf style, two shelves. A glass door is still listed
-as a door; the pane is bought, not cut from the sheet.
+as a door; the pane is bought, not cut from the sheet. A custom block
+contributes one rectangle per board, using that board's own size after the
+piece is scaled. Doors go to the Doors tab. A wall is a side, a plank is a
+shelf, and a bottom, top, or back keeps that role.
 
 ### 11.3 Estimate and canvas
 
@@ -426,18 +431,45 @@ grow across the window and shrink that diagram.
 ## 11.4 Component planner
 
 The Component planner is a separate window, opened from the center of the
-toolbar. It is a sketch for a future block builder.
+toolbar. It builds a furniture type from loose boards in 3D.
 
-- Several named blocks can be started. A new block begins empty.
-- The first block is a sample: two walls, a bottom, a top, and a door.
-- Boards can be added as a wall, a door, a bottom, a top, or a back, then
-  removed. Each board keeps a width and a height in millimetres.
-- The canvas draws a front view: walls at the sides, bottoms and tops as
-  rails, doors in the opening, and a back behind them.
+- Add a plank, wall, bottom, top, door, or back. Each board has its own width,
+  height, depth, and position, so one wall can be taller than the other and a
+  top can be smaller than the bottom.
+- The stage is a 2.4 m floor centered on the block. It uses the room's sky,
+  floor colour, 100 mm grid, red/green/blue axes, and lighting. The selected
+  board gets the same orange wire outline as a selected piece in the room.
+- Drag a board to move it across the floor. The move snaps to 10 mm.
+  Shift-drag raises or lowers it. Drag empty space to look around. Right-drag
+  or middle-drag pans. Scroll zooms.
+- Arrow keys nudge the selected board the same way as a piece in the room:
+  left and right move it sideways, up moves it toward the back wall, and down
+  moves it toward the front. Page Up and Page Down change its height. The step
+  is the room snap, or 10 mm when snap is off. These keys act only while the
+  component planner is the focused window, and a text or number field keeps
+  them for itself.
+- **Yaw**, **Pitch**, and **Roll** set a board's angle in degrees. Pitch lifts
+  the depth edge, which is how a roof slopes. Roll tilts the other way. **R**
+  adds 90° of yaw. Tilting lifts the board so its lowest corner stays on the
+  floor.
+- **Save type** writes the block to `customs.json` beside the project the
+  program was compiled from. The file is a list of named types. Each type
+  stores its boards (role, size, position, yaw, pitch, and roll) and the outer
+  width, height, and depth they were designed at. Saving a name that already
+  exists updates that type. The file is gitignored with the other JSON files.
+  The next launch loads it into **Customs**.
+- Choosing a type in Customs places a floor cabinet and copies the boards onto
+  that piece. Editing the library later does not change pieces already in the
+  room. The copy is stored in the project file, so the piece remains if
+  `customs.json` is removed.
+- A placed custom piece uses the same properties as the other cabinets:
+  name, width, height, depth, placement, legs, position, and facing. Width,
+  height, and depth scale every board from the designed size and keep each
+  board's angle. Body colour paints every board except the doors. Fronts
+  colour the doors. A custom piece has no per-board colour tab and no glass
+  door face, because its doors are plain boards.
 
-Nothing in this window is saved, cut, or placed in the room. The drawing is a
-rough front view and is expected to change. How the boards join, and how a
-finished block becomes furniture, is still to be decided.
+Joining boards into a manufactured carcass is still to be decided.
 
 ## 12. Code organization
 
@@ -456,8 +488,9 @@ finished block becomes furniture, is still to be decided.
 - `src/cutting/from_room.rs` — cabinet-to-cut-part conversion.
 - `src/cutting/ui.rs` — cut-planner interface and canvas.
 - `src/cutting/mod.rs` — second-window lifecycle and Egui schedule.
-- `src/builder/mod.rs` — component-planner window and the sketched blocks.
-- `src/builder/ui.rs` — the sketch list and the front-view drawing.
+- `src/builder/mod.rs` — component-planner window, saved custom types.
+- `src/builder/scene.rs` — 3D boards, orbit, and dragging.
+- `src/builder/ui.rs` — the board list and save controls.
 - `src/theme.rs` — shared visual styling.
 
 The domain model does not depend on the cutting module. Conversion between
@@ -481,6 +514,9 @@ A release is acceptable when:
   door face in an older file stays solid;
 - body and front colours can be set together, and each board can be set on
   its own tab;
+- a custom type can be saved, placed from Customs, scaled, and keeps each
+  board's yaw, pitch, and roll; the selected board in the component planner
+  is outlined;
 - room openings produce visible wall holes;
 - each of the four walls can be shown or hidden on its own;
 - a new pipe is 20 mm in diameter and its diameter can be edited;

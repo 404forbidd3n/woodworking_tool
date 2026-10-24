@@ -21,8 +21,10 @@ use bevy::winit::WinitSettings;
 use bevy_egui::EguiPlugin;
 
 use crate::builder::{
+    configure_gizmos, draw_stage, load_saved, nudge_selection,
     on_window_closed as component_window_closed, open_requested as open_component,
-    ComponentPlan, ComponentPlannerPass, ComponentWindow,
+    pointer as builder_pointer, sync_preview, BuilderChrome, BuilderGizmos, ComponentPlan,
+    ComponentPlannerPass, ComponentWindow, CustomLibrary,
 };
 use crate::cutting::{on_window_closed, open_requested, CutJob, CutPlannerPass, CutWindow};
 use crate::layout::edit::{
@@ -49,6 +51,8 @@ fn main() {
         .insert_resource(CutWindow::default())
         .insert_resource(ComponentPlan::default())
         .insert_resource(ComponentWindow::default())
+        .insert_resource(CustomLibrary::default())
+        .insert_resource(BuilderChrome::default())
         .insert_resource(History::default())
         .insert_non_send(layout::project::NativeDialog::default())
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -59,7 +63,8 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
-        .add_systems(Startup, setup_world)
+        .init_gizmo_group::<BuilderGizmos>()
+        .add_systems(Startup, (setup_world, load_saved, configure_gizmos))
         // Pointer runs first so a click and a camera move in the same frame
         // agree about what is selected. The camera transform is written last.
         .add_systems(
@@ -67,6 +72,9 @@ fn main() {
             (
                 open_requested,
                 open_component,
+                builder_pointer,
+                nudge_selection,
+                sync_preview,
                 finish_native_dialog,
                 pointer,
                 shortcuts,
@@ -84,6 +92,7 @@ fn main() {
         .add_systems(ComponentPlannerPass, builder::ui_draw)
         // New boxes have to exist before transforms propagate, or a resized
         // cabinet would lag a frame behind its outline.
+        .add_systems(PostUpdate, draw_stage)
         .add_systems(PostUpdate, sync_meshes.before(TransformSystems::Propagate))
         .add_systems(PostUpdate, track_history.after(sync_meshes))
         .add_systems(PostUpdate, draw_guides.after(TransformSystems::Propagate))

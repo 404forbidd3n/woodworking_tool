@@ -97,6 +97,8 @@ pub enum Kind {
     Corner {
         style: CornerStyle,
     },
+    /// A block built in the component planner from loose boards.
+    Custom,
 }
 
 /// How a corner cabinet is closed. Both styles share the same L-shaped carcass.
@@ -116,6 +118,261 @@ pub enum DoorStyle {
     #[default]
     Solid,
     Glass,
+}
+
+/// What a loose board is for. The shape is still just a box: a wall can be
+/// taller than the one beside it, and a top can be smaller than the bottom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomRole {
+    Plank,
+    Wall,
+    Bottom,
+    Top,
+    Door,
+    Back,
+}
+
+impl CustomRole {
+    pub const ALL: [Self; 6] = [
+        Self::Plank,
+        Self::Wall,
+        Self::Bottom,
+        Self::Top,
+        Self::Door,
+        Self::Back,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Plank => "Plank",
+            Self::Wall => "Wall",
+            Self::Bottom => "Bottom",
+            Self::Top => "Top",
+            Self::Door => "Door",
+            Self::Back => "Back",
+        }
+    }
+
+    pub fn default_board(self) -> CustomBoard {
+        let (width_mm, height_mm, depth_mm, x_mm, y_mm, z_mm) = match self {
+            Self::Wall => (18.0, 720.0, 560.0, -291.0, 360.0, 0.0),
+            Self::Plank => (564.0, 18.0, 500.0, 0.0, 360.0, 0.0),
+            Self::Bottom => (564.0, 18.0, 560.0, 0.0, 9.0, 0.0),
+            Self::Top => (500.0, 18.0, 480.0, 0.0, 711.0, 0.0),
+            Self::Door => (564.0, 680.0, 18.0, 0.0, 360.0, 289.0),
+            Self::Back => (564.0, 684.0, 18.0, 0.0, 360.0, -271.0),
+        };
+        CustomBoard {
+            role: self,
+            width_mm,
+            height_mm,
+            depth_mm,
+            x_mm,
+            y_mm,
+            z_mm,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
+            turns: 0,
+        }
+    }
+}
+
+/// One board inside a custom block. Position is the centre of the board.
+/// Y grows up from the builder floor. Yaw turns it around the vertical.
+/// Pitch and roll tilt it, so a roof can sit at any slope.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomBoard {
+    pub role: CustomRole,
+    pub width_mm: f32,
+    pub height_mm: f32,
+    pub depth_mm: f32,
+    pub x_mm: f32,
+    pub y_mm: f32,
+    pub z_mm: f32,
+    /// Degrees around Y. Zero keeps the board's width along X.
+    #[serde(default)]
+    pub yaw_deg: f32,
+    /// Degrees around the board's width. A roof uses this.
+    #[serde(default)]
+    pub pitch_deg: f32,
+    /// Degrees around the board's depth.
+    #[serde(default)]
+    pub roll_deg: f32,
+    /// Quarter turns from the first rotation control. Folded into yaw on clean.
+    #[serde(default)]
+    pub turns: u8,
+}
+
+impl CustomBoard {
+    pub fn sanitize(&mut self) {
+        self.width_mm = finite_or(self.width_mm, 18.0).clamp(1.0, 4000.0);
+        self.height_mm = finite_or(self.height_mm, 18.0).clamp(1.0, 4000.0);
+        self.depth_mm = finite_or(self.depth_mm, 18.0).clamp(1.0, 4000.0);
+        self.x_mm = finite_or(self.x_mm, 0.0).clamp(-10000.0, 10000.0);
+        self.y_mm = finite_or(self.y_mm, 0.0).clamp(-10000.0, 10000.0);
+        self.z_mm = finite_or(self.z_mm, 0.0).clamp(-10000.0, 10000.0);
+        self.yaw_deg = wrap_degrees(finite_or(self.yaw_deg, 0.0) + f32::from(self.turns) * 90.0);
+        self.pitch_deg = wrap_degrees(finite_or(self.pitch_deg, 0.0));
+        self.roll_deg = wrap_degrees(finite_or(self.roll_deg, 0.0));
+        self.turns = 0;
+    }
+
+    /// Yaw, then pitch, then roll. Pitch lifts the depth edge, which is the
+    /// slope of a roof. An old quarter-turn count still counts as yaw.
+    pub fn rotation(&self) -> Quat {
+        let yaw = (self.yaw_deg + f32::from(self.turns) * 90.0).to_radians();
+        Quat::from_rotation_y(yaw)
+            * Quat::from_rotation_x(self.pitch_deg.to_radians())
+            * Quat::from_rotation_z(self.roll_deg.to_radians())
+    }
+
+    /// Half-size of the world-aligned box around the rotated board, in millimetres.
+    pub fn world_half_mm(&self) -> Vec3 {
+        let half = Vec3::new(self.width_mm, self.height_mm, self.depth_mm) * 0.5;
+        let rotation = self.rotation();
+        let mut extent = Vec3::ZERO;
+        for x in [-half.x, half.x] {
+            for y in [-half.y, half.y] {
+                for z in [-half.z, half.z] {
+                    extent = extent.max((rotation * Vec3::new(x, y, z)).abs());
+                }
+            }
+        }
+        extent
+    }
+
+    /// Keep the lowest corner on the floor.
+    pub fn rest_on_floor(&mut self) {
+        let clearance = self.world_half_mm().y;
+        if self.y_mm < clearance {
+            self.y_mm = clearance;
+        }
+    }
+
+    /// Local box size in metres, scaled on the board's own axes, plus its tilt.
+    /// The slope stays at the angle it was drawn.
+    pub fn oriented(&self, sx: f32, sy: f32, sz: f32) -> (Vec3, Quat) {
+        let size = Vec3::new(
+            mm_to_m(self.width_mm * sx),
+            mm_to_m(self.height_mm * sy),
+            mm_to_m(self.depth_mm * sz),
+        );
+        (size, self.rotation())
+    }
+}
+
+pub(crate) fn wrap_degrees(degrees: f32) -> f32 {
+    let wrapped = degrees.rem_euclid(360.0);
+    if wrapped > 180.0 {
+        wrapped - 360.0
+    } else {
+        wrapped
+    }
+}
+
+/// A saved furniture type. `width_mm`, `height_mm`, and `depth_mm` are the
+/// size of the block as designed. Placing it in the room starts at that size,
+/// and the properties sliders scale every board from there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CustomType {
+    pub name: String,
+    pub boards: Vec<CustomBoard>,
+    pub width_mm: f32,
+    pub height_mm: f32,
+    pub depth_mm: f32,
+}
+
+impl CustomType {
+    pub fn empty(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            boards: Vec::new(),
+            width_mm: 600.0,
+            height_mm: 720.0,
+            depth_mm: 560.0,
+        }
+    }
+
+    pub fn door_count(&self) -> usize {
+        self.boards
+            .iter()
+            .filter(|board| board.role == CustomRole::Door)
+            .count()
+    }
+
+    pub fn bounds(&self) -> (Vec3, Vec3) {
+        let mut min = Vec3::splat(f32::MAX);
+        let mut max = Vec3::splat(f32::MIN);
+        for board in &self.boards {
+            let center = Vec3::new(board.x_mm, board.y_mm, board.z_mm);
+            let half = board.world_half_mm();
+            min = min.min(center - half);
+            max = max.max(center + half);
+        }
+        if self.boards.is_empty() {
+            (Vec3::ZERO, Vec3::new(600.0, 720.0, 560.0))
+        } else {
+            (min, max)
+        }
+    }
+
+    /// Store the outer size of the boards so later scaling has a stable base.
+    pub fn recompute_nominal(&mut self) {
+        let (min, max) = self.bounds();
+        let size = max - min;
+        self.width_mm = finite_or(size.x, 600.0).max(1.0);
+        self.height_mm = finite_or(size.y, 720.0).max(1.0);
+        self.depth_mm = finite_or(size.z, 560.0).max(1.0);
+    }
+
+    pub fn sanitize(&mut self) {
+        if self.name.trim().is_empty() {
+            self.name = "Custom block".to_owned();
+        }
+        for board in &mut self.boards {
+            board.sanitize();
+        }
+        self.recompute_nominal();
+    }
+
+    pub fn scaled_solids(&self, width_mm: f32, height_mm: f32, depth_mm: f32) -> Vec<Solid> {
+        if self.boards.is_empty() {
+            return Vec::new();
+        }
+        let (min, max) = self.bounds();
+        let sx = width_mm / self.width_mm.max(1.0);
+        let sy = height_mm / self.height_mm.max(1.0);
+        let sz = depth_mm / self.depth_mm.max(1.0);
+        let center_x = (min.x + max.x) * 0.5;
+        let center_z = (min.z + max.z) * 0.5;
+        let bottom = min.y;
+        let mut door = 0u8;
+        self.boards
+            .iter()
+            .map(|board| {
+                let role = if board.role == CustomRole::Door {
+                    let index = door;
+                    door += 1;
+                    Surface::Front(index)
+                } else {
+                    Surface::Carcass(0)
+                };
+                let (size, rotation) = board.oriented(sx, sy, sz);
+                Solid {
+                    size: size.max(Vec3::splat(0.001)),
+                    translation: Vec3::new(
+                        mm_to_m((board.x_mm - center_x) * sx),
+                        mm_to_m((board.y_mm - bottom) * sy),
+                        mm_to_m((board.z_mm - center_z) * sz),
+                    ),
+                    rotation,
+                    role,
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,6 +458,7 @@ impl Kind {
             Kind::Corner {
                 style: CornerStyle::DoubleDoor,
             } => "Corner Base Cabinet, Double Door",
+            Kind::Custom => "Custom block",
         }
     }
 
@@ -249,6 +507,7 @@ impl Kind {
                 | Kind::SlidingDoors
                 | Kind::OpenShelves { .. }
                 | Kind::Corner { .. }
+                | Kind::Custom
         )
     }
 
@@ -263,6 +522,7 @@ impl Kind {
                     (600.0, 720.0, 560.0, 0.0)
                 }
             }
+            Kind::Custom => (600.0, 720.0, 560.0, 0.0),
             Kind::Corner { .. } => {
                 // 600 mm along each wall. The arms are 350 mm deep, so a 560 mm
                 // base depth would leave almost no opening on a 600 mm plan.
@@ -554,6 +814,8 @@ pub struct Furniture {
     pub legs: LegStyle,
     /// Solid or glass fronts. Drawers and open pieces ignore this.
     pub doors: DoorStyle,
+    /// Boards for [`Kind::Custom`]. Other kinds leave this empty.
+    pub custom: Option<CustomType>,
     pub width_mm: f32,
     pub height_mm: f32,
     pub depth_mm: f32,
@@ -579,6 +841,7 @@ impl Furniture {
                 LegStyle::None
             },
             doors: DoorStyle::Solid,
+            custom: None,
             width_mm,
             height_mm,
             depth_mm,
@@ -590,7 +853,7 @@ impl Furniture {
     }
 
     pub fn ensure_front_finishes(&mut self) {
-        let count = self.kind.front_count();
+        let count = self.front_slots();
         self.finishes.fronts.resize(count, Finish::default());
         self.finishes.fronts.truncate(count);
     }
@@ -615,6 +878,17 @@ impl Furniture {
 
     pub fn label(&self) -> &'static str {
         self.kind.label_for(self.placement)
+    }
+
+    pub fn front_slots(&self) -> usize {
+        if self.kind == Kind::Custom {
+            self.custom
+                .as_ref()
+                .map(|block| block.door_count())
+                .unwrap_or(0)
+        } else {
+            self.kind.front_count()
+        }
     }
 }
 
@@ -960,6 +1234,13 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
             parts
         }
         Kind::Corner { style } => corner_cabinet(size, style, furniture.doors),
+        Kind::Custom => furniture
+            .custom
+            .as_ref()
+            .map(|block| {
+                block.scaled_solids(furniture.width_mm, furniture.height_mm, furniture.depth_mm)
+            })
+            .unwrap_or_default(),
     };
     let leg_height = furniture.leg_height_meters();
     if leg_height > 0.0 {
@@ -2002,6 +2283,8 @@ pub struct PieceFile {
     #[serde(default)]
     pub doors: DoorStyle,
     #[serde(default)]
+    pub custom: Option<CustomType>,
+    #[serde(default)]
     pub finishes: PartFinishes,
 }
 
@@ -2141,11 +2424,21 @@ impl ProjectFile {
             if piece.name.trim().is_empty() {
                 piece.name = piece.kind.label_for(piece.placement).to_owned();
             }
-            piece
-                .finishes
-                .fronts
-                .resize(piece.kind.front_count(), Finish::default());
-            piece.finishes.fronts.truncate(piece.kind.front_count());
+            let fronts = if piece.kind == Kind::Custom {
+                let block = piece
+                    .custom
+                    .get_or_insert_with(|| CustomType::empty(piece.name.clone()));
+                block.sanitize();
+                piece.width_mm = piece.width_mm.max(1.0);
+                piece.height_mm = piece.height_mm.max(1.0);
+                piece.depth_mm = piece.depth_mm.max(1.0);
+                block.door_count()
+            } else {
+                piece.custom = None;
+                piece.kind.front_count()
+            };
+            piece.finishes.fronts.resize(fronts, Finish::default());
+            piece.finishes.fronts.truncate(fronts);
         }
         let list = &mut self.cut_list;
         list.board_width_mm = finite_or(list.board_width_mm, 2440.0).clamp(100.0, 4000.0);
@@ -2516,5 +2809,95 @@ mod tests {
         )
         .unwrap();
         assert_eq!(piece.doors, DoorStyle::Solid);
+    }
+
+    #[test]
+    fn custom_block_scales_from_the_designed_size() {
+        let mut block = CustomType::empty("Wide");
+        block.boards.push(CustomBoard {
+            role: CustomRole::Wall,
+            width_mm: 18.0,
+            height_mm: 100.0,
+            depth_mm: 40.0,
+            x_mm: -50.0,
+            y_mm: 50.0,
+            z_mm: 0.0,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
+            turns: 0,
+        });
+        block.boards.push(CustomBoard {
+            role: CustomRole::Wall,
+            width_mm: 18.0,
+            height_mm: 100.0,
+            depth_mm: 40.0,
+            x_mm: 50.0,
+            y_mm: 50.0,
+            z_mm: 0.0,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
+            turns: 0,
+        });
+        block.recompute_nominal();
+        let designed = block.scaled_solids(block.width_mm, block.height_mm, block.depth_mm);
+        let wider = block.scaled_solids(block.width_mm * 2.0, block.height_mm, block.depth_mm);
+        let designed_gap = (designed[1].translation.x - designed[0].translation.x).abs();
+        let wider_gap = (wider[1].translation.x - wider[0].translation.x).abs();
+        assert!((wider_gap - designed_gap * 2.0).abs() < 0.001);
+        assert!((wider[0].size.y - designed[0].size.y).abs() < 0.001);
+        // The bottoms of both walls stay on the floor when only the width changes.
+        let designed_bottom = designed[0].translation.y - designed[0].size.y * 0.5;
+        let wider_bottom = wider[0].translation.y - wider[0].size.y * 0.5;
+        assert!(designed_bottom.abs() < 0.001);
+        assert!(wider_bottom.abs() < 0.001);
+    }
+
+    #[test]
+    fn a_quarter_turn_swaps_a_boards_width_and_depth() {
+        let mut block = CustomType::empty("Turned");
+        block.boards.push(CustomBoard {
+            role: CustomRole::Plank,
+            width_mm: 200.0,
+            height_mm: 18.0,
+            depth_mm: 40.0,
+            x_mm: 0.0,
+            y_mm: 9.0,
+            z_mm: 0.0,
+            yaw_deg: 0.0,
+            pitch_deg: 0.0,
+            roll_deg: 0.0,
+            turns: 1,
+        });
+        block.recompute_nominal();
+        assert!((block.width_mm - 40.0).abs() < 0.1);
+        assert!((block.depth_mm - 200.0).abs() < 0.1);
+        block.sanitize();
+        assert_eq!(block.boards[0].turns, 0);
+        assert!((block.boards[0].yaw_deg - 90.0).abs() < 0.01);
+        let solid = &block.scaled_solids(block.width_mm, block.height_mm, block.depth_mm)[0];
+        assert_ne!(solid.rotation, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn a_pitched_board_stands_up_like_a_roof() {
+        let board = CustomBoard {
+            role: CustomRole::Plank,
+            width_mm: 80.0,
+            height_mm: 18.0,
+            depth_mm: 200.0,
+            x_mm: 0.0,
+            y_mm: 0.0,
+            z_mm: 0.0,
+            yaw_deg: 0.0,
+            pitch_deg: 90.0,
+            roll_deg: 0.0,
+            turns: 0,
+        };
+        let half = board.world_half_mm();
+        assert!((half.x - 40.0).abs() < 0.2);
+        assert!((half.y - 100.0).abs() < 0.2);
+        assert!((half.z - 9.0).abs() < 0.2);
     }
 }
