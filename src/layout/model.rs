@@ -120,8 +120,8 @@ pub enum DoorStyle {
     Glass,
 }
 
-/// What a loose board is for. The shape is still just a box: a wall can be
-/// taller than the one beside it, and a top can be smaller than the bottom.
+/// What a loose board is for. Walls, planks, and the rest can still differ
+/// in size. A triangle is a gable, a leg is a foot, and a drawer is a front.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CustomRole {
@@ -131,16 +131,20 @@ pub enum CustomRole {
     Top,
     Door,
     Back,
+    Drawer,
+    Leg,
 }
 
 impl CustomRole {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Plank,
         Self::Wall,
         Self::Bottom,
         Self::Top,
         Self::Door,
         Self::Back,
+        Self::Drawer,
+        Self::Leg,
     ];
 
     pub fn label(self) -> &'static str {
@@ -151,7 +155,13 @@ impl CustomRole {
             Self::Top => "Top",
             Self::Door => "Door",
             Self::Back => "Back",
+            Self::Drawer => "Drawer",
+            Self::Leg => "Leg",
         }
+    }
+
+    pub fn is_front(self) -> bool {
+        matches!(self, Self::Door | Self::Drawer)
     }
 
     pub fn default_board(self) -> CustomBoard {
@@ -162,9 +172,17 @@ impl CustomRole {
             Self::Top => (500.0, 18.0, 480.0, 0.0, 711.0, 0.0),
             Self::Door => (564.0, 680.0, 18.0, 0.0, 360.0, 289.0),
             Self::Back => (564.0, 684.0, 18.0, 0.0, 360.0, -271.0),
+            Self::Drawer => (500.0, 150.0, 18.0, 0.0, 90.0, 289.0),
+            Self::Leg => (40.0, 100.0, 40.0, -250.0, 50.0, -220.0),
         };
         CustomBoard {
             role: self,
+            shape: BoardShape::Box,
+            leg: if self == Self::Leg {
+                LegStyle::Plastic100
+            } else {
+                LegStyle::None
+            },
             width_mm,
             height_mm,
             depth_mm,
@@ -175,6 +193,34 @@ impl CustomRole {
             pitch_deg: 0.0,
             roll_deg: 0.0,
             turns: 0,
+            hole_width_mm: 0.0,
+            hole_height_mm: 0.0,
+            hole_x_mm: 0.0,
+            hole_y_mm: 0.0,
+        }
+    }
+}
+
+/// The outline of a custom board. A triangle stands on its base.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardShape {
+    #[default]
+    Box,
+    /// Isosceles gable. Width is the base and height is the peak.
+    Triangle,
+    /// Right angle at the lower left. Width is the base and height is the rise.
+    RightTriangle,
+}
+
+impl BoardShape {
+    pub const ALL: [Self; 3] = [Self::Box, Self::Triangle, Self::RightTriangle];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Box => "Box",
+            Self::Triangle => "Triangle",
+            Self::RightTriangle => "Right triangle",
         }
     }
 }
@@ -185,6 +231,12 @@ impl CustomRole {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomBoard {
     pub role: CustomRole,
+    /// Missing on older saves. Those stay boxes.
+    #[serde(default)]
+    pub shape: BoardShape,
+    /// Used when the role is a leg. Other boards ignore it.
+    #[serde(default)]
+    pub leg: LegStyle,
     pub width_mm: f32,
     pub height_mm: f32,
     pub depth_mm: f32,
@@ -203,6 +255,16 @@ pub struct CustomBoard {
     /// Quarter turns from the first rotation control. Folded into yaw on clean.
     #[serde(default)]
     pub turns: u8,
+    /// A rectangular opening in a box, in millimetres. Zero in either axis means solid.
+    #[serde(default)]
+    pub hole_width_mm: f32,
+    #[serde(default)]
+    pub hole_height_mm: f32,
+    /// Hole centre, measured from the board centre across its width and height.
+    #[serde(default)]
+    pub hole_x_mm: f32,
+    #[serde(default)]
+    pub hole_y_mm: f32,
 }
 
 impl CustomBoard {
@@ -217,6 +279,15 @@ impl CustomBoard {
         self.pitch_deg = wrap_degrees(finite_or(self.pitch_deg, 0.0));
         self.roll_deg = wrap_degrees(finite_or(self.roll_deg, 0.0));
         self.turns = 0;
+        self.hole_width_mm = finite_or(self.hole_width_mm, 0.0).clamp(0.0, 4000.0);
+        self.hole_height_mm = finite_or(self.hole_height_mm, 0.0).clamp(0.0, 4000.0);
+        self.hole_x_mm = finite_or(self.hole_x_mm, 0.0).clamp(-4000.0, 4000.0);
+        self.hole_y_mm = finite_or(self.hole_y_mm, 0.0).clamp(-4000.0, 4000.0);
+        if self.role != CustomRole::Leg {
+            self.leg = LegStyle::None;
+        } else if self.leg == LegStyle::None {
+            self.leg = LegStyle::Plastic100;
+        }
     }
 
     /// Yaw, then pitch, then roll. Pitch lifts the depth edge, which is the
@@ -251,16 +322,120 @@ impl CustomBoard {
         }
     }
 
-    /// Local box size in metres, scaled on the board's own axes, plus its tilt.
-    /// The slope stays at the angle it was drawn.
-    pub fn oriented(&self, sx: f32, sy: f32, sz: f32) -> (Vec3, Quat) {
-        let size = Vec3::new(
-            mm_to_m(self.width_mm * sx),
-            mm_to_m(self.height_mm * sy),
-            mm_to_m(self.depth_mm * sz),
-        );
-        (size, self.rotation())
+    /// Local boxes before rotation. A hole becomes the frame around the opening.
+    /// A triangle stays one piece; the mesh carries the shape.
+    pub fn pieces_mm(&self) -> Vec<(Vec3, Vec3)> {
+        let size = Vec3::new(self.width_mm, self.height_mm, self.depth_mm);
+        if self.shape != BoardShape::Box || self.hole_width_mm < 1.0 || self.hole_height_mm < 1.0 {
+            return vec![(size, Vec3::ZERO)];
+        }
+        let w = self.width_mm;
+        let h = self.height_mm;
+        let d = self.depth_mm;
+        let hw = self.hole_width_mm.min((w - 2.0).max(1.0));
+        let hh = self.hole_height_mm.min((h - 2.0).max(1.0));
+        let max_x = ((w - hw) * 0.5).max(0.0);
+        let max_y = ((h - hh) * 0.5).max(0.0);
+        let ox = self.hole_x_mm.clamp(-max_x, max_x);
+        let oy = self.hole_y_mm.clamp(-max_y, max_y);
+        let left = ox - hw * 0.5;
+        let right = ox + hw * 0.5;
+        let bottom = oy - hh * 0.5;
+        let top = oy + hh * 0.5;
+        let x0 = -w * 0.5;
+        let x1 = w * 0.5;
+        let y0 = -h * 0.5;
+        let y1 = h * 0.5;
+        let mut parts = Vec::new();
+        let left_w = left - x0;
+        if left_w > 0.5 {
+            parts.push((
+                Vec3::new(left_w, h, d),
+                Vec3::new(x0 + left_w * 0.5, 0.0, 0.0),
+            ));
+        }
+        let right_w = x1 - right;
+        if right_w > 0.5 {
+            parts.push((
+                Vec3::new(right_w, h, d),
+                Vec3::new(right + right_w * 0.5, 0.0, 0.0),
+            ));
+        }
+        let inner_w = right - left;
+        let bottom_h = bottom - y0;
+        if bottom_h > 0.5 && inner_w > 0.5 {
+            parts.push((
+                Vec3::new(inner_w, bottom_h, d),
+                Vec3::new(ox, y0 + bottom_h * 0.5, 0.0),
+            ));
+        }
+        let top_h = y1 - top;
+        if top_h > 0.5 && inner_w > 0.5 {
+            parts.push((
+                Vec3::new(inner_w, top_h, d),
+                Vec3::new(ox, top + top_h * 0.5, 0.0),
+            ));
+        }
+        if parts.is_empty() {
+            vec![(size, Vec3::ZERO)]
+        } else {
+            parts
+        }
     }
+
+    /// A drawer front plus the box behind it. `index` stacks the next one above.
+    pub fn drawer_set(index: usize) -> Vec<CustomBoard> {
+        let y = 90.0 + index as f32 * 170.0;
+        vec![
+            placed(CustomRole::Drawer, 500.0, 150.0, 18.0, 0.0, y, 289.0),
+            placed(CustomRole::Wall, 18.0, 110.0, 420.0, -241.0, y - 20.0, 60.0),
+            placed(CustomRole::Wall, 18.0, 110.0, 420.0, 241.0, y - 20.0, 60.0),
+            placed(CustomRole::Bottom, 464.0, 16.0, 420.0, 0.0, y - 70.0, 60.0),
+            placed(CustomRole::Back, 464.0, 90.0, 16.0, 0.0, y - 25.0, -150.0),
+        ]
+    }
+
+    pub fn leg_at(style: LegStyle, index: usize) -> Self {
+        let style = if style == LegStyle::None {
+            LegStyle::Plastic100
+        } else {
+            style
+        };
+        let height = style.height_mm().max(40.0);
+        let corners = [
+            (-250.0, -220.0),
+            (250.0, -220.0),
+            (-250.0, 220.0),
+            (250.0, 220.0),
+        ];
+        let (x, z) = corners[index % 4];
+        let mut board = CustomRole::Leg.default_board();
+        board.leg = style;
+        board.height_mm = height;
+        board.y_mm = height * 0.5;
+        board.x_mm = x + (index / 4) as f32 * 50.0;
+        board.z_mm = z;
+        board
+    }
+}
+
+fn placed(
+    role: CustomRole,
+    width_mm: f32,
+    height_mm: f32,
+    depth_mm: f32,
+    x_mm: f32,
+    y_mm: f32,
+    z_mm: f32,
+) -> CustomBoard {
+    let mut board = role.default_board();
+    board.width_mm = width_mm;
+    board.height_mm = height_mm;
+    board.depth_mm = depth_mm;
+    board.x_mm = x_mm;
+    board.y_mm = y_mm;
+    board.z_mm = z_mm;
+    board
 }
 
 pub(crate) fn wrap_degrees(degrees: f32) -> f32 {
@@ -298,7 +473,7 @@ impl CustomType {
     pub fn door_count(&self) -> usize {
         self.boards
             .iter()
-            .filter(|board| board.role == CustomRole::Door)
+            .filter(|board| board.role.is_front())
             .count()
     }
 
@@ -349,29 +524,50 @@ impl CustomType {
         let center_z = (min.z + max.z) * 0.5;
         let bottom = min.y;
         let mut door = 0u8;
-        self.boards
-            .iter()
-            .map(|board| {
-                let role = if board.role == CustomRole::Door {
-                    let index = door;
-                    door += 1;
-                    Surface::Front(index)
-                } else {
-                    Surface::Carcass(0)
-                };
-                let (size, rotation) = board.oriented(sx, sy, sz);
-                Solid {
-                    size: size.max(Vec3::splat(0.001)),
-                    translation: Vec3::new(
-                        mm_to_m((board.x_mm - center_x) * sx),
-                        mm_to_m((board.y_mm - bottom) * sy),
-                        mm_to_m((board.z_mm - center_z) * sz),
-                    ),
+        let mut solids = Vec::new();
+        for board in &self.boards {
+            let role = if board.role.is_front() {
+                let index = door;
+                door += 1;
+                Surface::Front(index)
+            } else if board.role == CustomRole::Leg {
+                Surface::Leg(board.leg)
+            } else {
+                Surface::Carcass(0)
+            };
+            let rotation = board.rotation();
+            let origin = Vec3::new(
+                mm_to_m((board.x_mm - center_x) * sx),
+                mm_to_m((board.y_mm - bottom) * sy),
+                mm_to_m((board.z_mm - center_z) * sz),
+            );
+            let pieces = board.pieces_mm();
+            let shape = if pieces.len() == 1 {
+                board.shape
+            } else {
+                BoardShape::Box
+            };
+            for (size_mm, offset_mm) in pieces {
+                let local = Vec3::new(
+                    mm_to_m(offset_mm.x * sx),
+                    mm_to_m(offset_mm.y * sy),
+                    mm_to_m(offset_mm.z * sz),
+                );
+                solids.push(Solid {
+                    size: Vec3::new(
+                        mm_to_m(size_mm.x * sx),
+                        mm_to_m(size_mm.y * sy),
+                        mm_to_m(size_mm.z * sz),
+                    )
+                    .max(Vec3::splat(0.001)),
+                    translation: origin + rotation * local,
                     rotation,
                     role,
-                }
-            })
-            .collect()
+                    shape,
+                });
+            }
+        }
+        solids
     }
 }
 
@@ -1166,6 +1362,7 @@ pub struct Solid {
     pub translation: Vec3,
     pub rotation: Quat,
     pub role: Surface,
+    pub shape: BoardShape,
 }
 
 impl Solid {
@@ -1175,8 +1372,48 @@ impl Solid {
             translation,
             rotation: Quat::IDENTITY,
             role,
+            shape: BoardShape::Box,
         }
     }
+}
+
+/// Mesh for a board. Triangles are prisms standing on the width axis.
+pub fn shape_mesh(shape: BoardShape, size: Vec3) -> Mesh {
+    let size = size.max(Vec3::splat(0.001));
+    match shape {
+        BoardShape::Box => Mesh::from(Cuboid::new(size.x, size.y, size.z)),
+        BoardShape::Triangle | BoardShape::RightTriangle => triangle_prism(size, shape),
+    }
+}
+
+fn triangle_prism(size: Vec3, shape: BoardShape) -> Mesh {
+    let (hx, hy, hz) = (size.x * 0.5, size.y * 0.5, size.z * 0.5);
+    let (a, b, c) = if shape == BoardShape::RightTriangle {
+        ([-hx, -hy], [hx, -hy], [-hx, hy])
+    } else {
+        ([-hx, -hy], [hx, -hy], [0.0, hy])
+    };
+    let at = |point: [f32; 2], z: f32| [point[0], point[1], z];
+    let mut positions = Vec::new();
+    let tri = |positions: &mut Vec<[f32; 3]>, p: [f32; 3], q: [f32; 3], r: [f32; 3]| {
+        positions.extend([p, q, r]);
+    };
+    tri(&mut positions, at(a, hz), at(b, hz), at(c, hz));
+    tri(&mut positions, at(a, -hz), at(c, -hz), at(b, -hz));
+    // Each boundary edge P -> Q of the counter-clockwise profile.
+    for (p, q) in [(a, b), (b, c), (c, a)] {
+        let (p0, p1) = (at(p, hz), at(p, -hz));
+        let (q0, q1) = (at(q, hz), at(q, -hz));
+        tri(&mut positions, p0, p1, q1);
+        tri(&mut positions, p0, q1, q0);
+    }
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.compute_flat_normals();
+    mesh
 }
 
 /// Build the boxes that represent a piece. Every cabinet is a five-panel
@@ -1441,6 +1678,7 @@ fn lift_front(size: Vec3, style: DoorStyle) -> Vec<Solid> {
         translation: handle_point,
         rotation,
         role: Surface::Handle,
+        shape: BoardShape::Box,
     });
     parts
 }
@@ -1498,6 +1736,7 @@ fn door_leaf(
             translation: center,
             rotation,
             role: Surface::Front(index),
+            shape: BoardShape::Box,
         }];
     }
     let rail = 0.042_f32.min(width * 0.18).min(height * 0.18).max(0.008);
@@ -1506,6 +1745,7 @@ fn door_leaf(
         translation: center + rotation * Vec3::new(ox, oy, 0.0),
         rotation,
         role: Surface::Front(index),
+        shape: BoardShape::Box,
     };
     let inner_w = (width - rail * 2.0).max(0.01);
     let inner_h = (height - rail * 2.0).max(0.01);
@@ -1519,6 +1759,7 @@ fn door_leaf(
             translation: center + rotation * Vec3::new(0.0, 0.0, 0.002),
             rotation,
             role: Surface::Glass,
+            shape: BoardShape::Box,
         },
     ]
 }
@@ -1991,6 +2232,7 @@ fn round_sink(size: Vec3) -> Vec<Solid> {
             translation: Vec3::new(angle.cos() * mid, side_y, angle.sin() * mid),
             rotation: Quat::from_rotation_y(-angle),
             role: metal,
+            shape: BoardShape::Box,
         });
         let rim_mid = radius - wall * 0.35;
         parts.push(Solid {
@@ -2002,6 +2244,7 @@ fn round_sink(size: Vec3) -> Vec<Solid> {
             ),
             rotation: Quat::from_rotation_y(-angle),
             role: metal,
+            shape: BoardShape::Box,
         });
     }
 
@@ -2826,6 +3069,7 @@ mod tests {
             pitch_deg: 0.0,
             roll_deg: 0.0,
             turns: 0,
+            ..CustomRole::Wall.default_board()
         });
         block.boards.push(CustomBoard {
             role: CustomRole::Wall,
@@ -2839,6 +3083,7 @@ mod tests {
             pitch_deg: 0.0,
             roll_deg: 0.0,
             turns: 0,
+            ..CustomRole::Wall.default_board()
         });
         block.recompute_nominal();
         let designed = block.scaled_solids(block.width_mm, block.height_mm, block.depth_mm);
@@ -2869,6 +3114,7 @@ mod tests {
             pitch_deg: 0.0,
             roll_deg: 0.0,
             turns: 1,
+            ..CustomRole::Plank.default_board()
         });
         block.recompute_nominal();
         assert!((block.width_mm - 40.0).abs() < 0.1);
@@ -2894,10 +3140,37 @@ mod tests {
             pitch_deg: 90.0,
             roll_deg: 0.0,
             turns: 0,
+            ..CustomRole::Plank.default_board()
         };
         let half = board.world_half_mm();
         assert!((half.x - 40.0).abs() < 0.2);
         assert!((half.y - 100.0).abs() < 0.2);
         assert!((half.z - 9.0).abs() < 0.2);
+    }
+
+    #[test]
+    fn a_hole_splits_a_board_into_a_frame() {
+        let mut board = CustomRole::Door.default_board();
+        board.hole_width_mm = 200.0;
+        board.hole_height_mm = 300.0;
+        assert!(board.pieces_mm().len() >= 4);
+        let mut block = CustomType::empty("Open");
+        block.boards.push(board);
+        block.recompute_nominal();
+        let solids = block.scaled_solids(block.width_mm, block.height_mm, block.depth_mm);
+        assert!(solids.len() >= 4);
+        assert!(solids.iter().all(|solid| solid.shape == BoardShape::Box));
+    }
+
+    #[test]
+    fn a_triangle_wall_keeps_its_shape() {
+        let mut board = CustomRole::Wall.default_board();
+        board.shape = BoardShape::Triangle;
+        let mut block = CustomType::empty("Gable");
+        block.boards.push(board);
+        block.recompute_nominal();
+        let solids = block.scaled_solids(block.width_mm, block.height_mm, block.depth_mm);
+        assert_eq!(solids.len(), 1);
+        assert_eq!(solids[0].shape, BoardShape::Triangle);
     }
 }

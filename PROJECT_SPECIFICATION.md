@@ -415,9 +415,13 @@ Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
 A corner cabinet contributes an approximate list: sides, top, bottom, back,
 two doors, and, for the shelf style, two shelves. A glass door is still listed
 as a door; the pane is bought, not cut from the sheet. A custom block
-contributes one rectangle per board, using that board's own size after the
-piece is scaled. Doors go to the Doors tab and backs go to the Backs tab. A wall is a side,
-a plank is a shelf, and a bottom or top keeps that role.
+contributes one rectangle for each piece of each board, after the piece is
+scaled. A door or drawer front goes to the Doors tab and a back goes to the
+Backs tab. A wall is a side, a plank is a shelf, and a bottom or top keeps
+that role. A leg is listed under Parts as a custom piece. A rectangular hole
+is cut as the frame around the opening, one rectangle for each side of that
+frame. A triangle is cut as the rectangle around it. The cabinet's purchased
+adjustable legs stay off the sheet.
 
 ### 11.3 Estimate and canvas
 
@@ -442,15 +446,31 @@ grow across the window and shrink that diagram.
 The Component planner is a separate window, opened from the center of the
 toolbar. It builds a furniture type from loose boards in 3D.
 
-- Add a plank, wall, bottom, top, door, or back. Each board has its own width,
-  height, depth, and position, so one wall can be taller than the other and a
-  top can be smaller than the bottom.
+- Add a plank, wall, bottom, top, door, back, drawer, or leg. Each board has
+  its own width, height, depth, and position, so one wall can be taller than
+  the other and a top can be smaller than the bottom.
 - The stage is a 2.4 m floor centered on the block. It uses the room's sky,
   floor colour, 100 mm grid, red/green/blue axes, and lighting. The selected
   board gets the same orange wire outline as a selected piece in the room.
 - Drag a board to move it across the floor. The move snaps to 10 mm.
-  Shift-drag raises or lowers it. Drag empty space to look around. Right-drag
-  or middle-drag pans. Scroll zooms.
+  Shift-drag raises or lowers it. The camera matches the room: drag empty
+  space, middle-drag, or Alt-drag to look around; right-drag, Shift+middle-drag,
+  or Space+left-drag to pan; scroll to zoom. With nothing selected, or while
+  Ctrl is held, the arrow keys pan the camera too.
+- Each part is listed under **In this block** with its own **Delete**. Delete
+  or Backspace also removes the selected part, including when the pointer is
+  over the sidebar, as long as a text field does not have the keyboard.
+- A part can be a box, an isosceles triangle, or a right triangle. **Triangle
+  wall** and **Right triangle** add a gable on the back of the block. The
+  triangle is a prism: its width is the base and its height is the peak. A
+  right triangle has the right angle at the lower left.
+- Legs can be plastic or metal at 100 mm or 150 mm, or wood at 100 mm. Each
+  click places the next leg at a footprint corner, then steps outward.
+- **Add drawer** places a drawer front and the box behind it: two sides, a
+  bottom, and a back. Another click stacks the next drawer above the last.
+- Hole width and height cut a rectangular opening through the depth of a box.
+  Hole X and Hole Y shift that opening from the centre of the face. Leave
+  either size at 0 mm for a solid board. Triangles ignore holes.
 - Arrow keys nudge the selected board the same way as a piece in the room:
   left and right move it sideways, up moves it toward the back wall, and down
   moves it toward the front. Page Up and Page Down change its height. The step
@@ -463,9 +483,10 @@ toolbar. It builds a furniture type from loose boards in 3D.
   floor.
 - **Save type** writes the block to `customs.json` beside the project the
   program was compiled from. The file is a list of named types. Each type
-  stores its boards (role, size, position, yaw, pitch, and roll) and the outer
-  width, height, and depth they were designed at. Saving a name that already
-  exists updates that type. The file is gitignored with the other JSON files.
+  stores its boards (role, shape, leg, hole, size, position, yaw, pitch, and
+  roll) and the outer width, height, and depth they were designed at. Saving
+  a name that already exists updates that type. The file is gitignored with
+  the other JSON files.
   The next launch loads it into **Customs**.
 - Choosing a type in Customs places a floor cabinet and copies the boards onto
   that piece. Editing the library later does not change pieces already in the
@@ -474,8 +495,9 @@ toolbar. It builds a furniture type from loose boards in 3D.
 - A placed custom piece uses the same properties as the other cabinets:
   name, width, height, depth, placement, legs, position, and facing. Width,
   height, and depth scale every board from the designed size and keep each
-  board's angle. Body colour paints every board except the doors. Fronts
-  colour the doors. A custom piece has no per-board colour tab and no glass
+  board's angle. Body colour paints every board except doors and drawers.
+  Fronts colour the doors and drawers. Legs keep their own plastic, metal, or
+  wood look. A custom piece has no per-board colour tab and no glass
   door face, because its doors are plain boards.
 
 Joining boards into a manufactured carcass is still to be decided.
@@ -528,7 +550,8 @@ A release is acceptable when:
   its own tab;
 - a custom type can be saved, placed from Customs, scaled, and keeps each
   board's yaw, pitch, and roll; the selected board in the component planner
-  is outlined;
+  is outlined, and a part can be deleted, shaped, holed, or given a leg or
+  drawer;
 - room openings produce visible wall holes;
 - each of the four walls can be shown or hidden on its own;
 - a new pipe is 20 mm in diameter and its diameter can be edited;

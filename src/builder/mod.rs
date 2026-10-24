@@ -239,6 +239,18 @@ impl BuilderOrbit {
             );
         Transform::from_translation(eye).looking_at(self.focus, Vec3::Y)
     }
+
+    /// Same screen pan as a right-drag in the room.
+    pub fn pan_screen(&mut self, x: f32, y: f32) {
+        if x == 0.0 && y == 0.0 {
+            return;
+        }
+        let pose = self.pose();
+        let right = pose.rotation * Vec3::X;
+        let up = pose.rotation * Vec3::Y;
+        let step = (self.distance * 0.08).clamp(0.05, 2.0);
+        self.focus += right * x * step + up * y * step;
+    }
 }
 
 /// The block currently being edited. It is not in the room until it is saved
@@ -269,6 +281,19 @@ impl Default for ComponentPlan {
 }
 
 impl ComponentPlan {
+    pub fn remove_board(&mut self, index: usize) {
+        if index >= self.boards.len() {
+            return;
+        }
+        self.boards.remove(index);
+        self.selected = match self.selected {
+            Some(selected) if selected == index => None,
+            Some(selected) if selected > index => Some(selected - 1),
+            other => other,
+        };
+        self.mesh_dirty = true;
+    }
+
     pub fn load_type(&mut self, block: &CustomType) {
         self.name = block.name.clone();
         self.boards = block.boards.clone();

@@ -1755,7 +1755,9 @@ fn draw_properties(
         .show(ui, |ui| {
             if furniture.kind == Kind::Custom {
                 ui.label(
-                    egui::RichText::new("Body colours every board except the doors.")
+                    egui::RichText::new(
+                        "Body colours the carcass. Fronts colour doors and drawers. Legs keep their own material.",
+                    )
                         .size(12.0)
                         .color(theme::muted()),
                 );

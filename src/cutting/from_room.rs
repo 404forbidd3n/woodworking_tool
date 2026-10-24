@@ -136,28 +136,28 @@ fn custom_parts(name: &str, furniture: &Furniture) -> Vec<CutPart> {
     let Some(block) = furniture.custom.as_ref() else {
         return Vec::new();
     };
-    block
-        .scaled_solids(furniture.width_mm, furniture.height_mm, furniture.depth_mm)
-        .into_iter()
-        .zip(block.boards.iter())
-        .map(|(solid, board)| {
-            let mut span = [
-                m_to_mm(solid.size.x),
-                m_to_mm(solid.size.y),
-                m_to_mm(solid.size.z),
-            ];
+    let sx = furniture.width_mm / block.width_mm.max(1.0);
+    let sy = furniture.height_mm / block.height_mm.max(1.0);
+    let sz = furniture.depth_mm / block.depth_mm.max(1.0);
+    let mut parts = Vec::new();
+    for board in &block.boards {
+        let role = match board.role {
+            CustomRole::Door => PartRole::Door,
+            CustomRole::Drawer => PartRole::DrawerFront,
+            CustomRole::Bottom => PartRole::Bottom,
+            CustomRole::Top => PartRole::Top,
+            CustomRole::Wall => PartRole::Side,
+            CustomRole::Back => PartRole::Back,
+            CustomRole::Plank => PartRole::Shelf,
+            CustomRole::Leg => PartRole::Custom,
+        };
+        for (size_mm, _) in board.pieces_mm() {
+            let mut span = [size_mm.x * sx, size_mm.y * sy, size_mm.z * sz];
             span.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-            let role = match board.role {
-                CustomRole::Door => PartRole::Door,
-                CustomRole::Bottom => PartRole::Bottom,
-                CustomRole::Top => PartRole::Top,
-                CustomRole::Wall => PartRole::Side,
-                CustomRole::Back => PartRole::Back,
-                CustomRole::Plank => PartRole::Shelf,
-            };
-            named(name, role, span[0].max(1.0), span[1].max(1.0), 1)
-        })
-        .collect()
+            parts.push(named(name, role, span[0].max(1.0), span[1].max(1.0), 1));
+        }
+    }
+    parts
 }
 
 fn cabinet(

@@ -439,6 +439,7 @@ fn room_solids(room: &Room) -> Vec<Solid> {
         translation: Vec3::new(w * 0.5, -0.02, d * 0.5),
         rotation: Quat::IDENTITY,
         role: Surface::Floor,
+        shape: crate::layout::model::BoardShape::Box,
     }];
     for side in crate::layout::model::WallSide::ALL {
         if room.wall_shown(side) {
@@ -518,6 +519,7 @@ fn wall(size: Vec3, translation: Vec3) -> Solid {
         translation,
         rotation: Quat::IDENTITY,
         role: Surface::Wall,
+        shape: crate::layout::model::BoardShape::Box,
     }
 }
 
@@ -564,7 +566,7 @@ fn replace_children(
                     )
                 } else {
                     (
-                        meshes.add(Cuboid::new(part.size.x, part.size.y, part.size.z)),
+                        meshes.add(crate::layout::model::shape_mesh(part.shape, part.size)),
                         part.rotation,
                     )
                 };

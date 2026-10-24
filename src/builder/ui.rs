@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext};
 
-use crate::layout::model::CustomRole;
+use crate::layout::model::{BoardShape, CustomBoard, CustomRole, LegStyle};
 use crate::theme;
 
 use super::{BuilderChrome, ComponentPlan, ComponentPlannerCamera, CustomLibrary};
@@ -74,7 +74,7 @@ fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLib
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(
-                    "Drag a board to move it. Shift-drag raises it. Arrow keys nudge it. Yaw turns it, and pitch or roll tilts it for a roof. R adds 90° of yaw. Drag empty space to look around.",
+                    "Drag a board to move it. Shift-drag raises it. Arrow keys nudge it, or pan the camera when nothing is selected. Ctrl+arrows pans too. Middle-drag or Alt-drag orbits. Right-drag pans. Delete removes the selected board.",
                 )
                 .color(theme::muted()),
             );
@@ -99,6 +99,81 @@ fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLib
                     }
                 }
             });
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Shapes").color(theme::muted()));
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Triangle wall").clicked() {
+                    push_board(plan, triangle_wall(BoardShape::Triangle));
+                }
+                if ui.button("Right triangle").clicked() {
+                    push_board(plan, triangle_wall(BoardShape::RightTriangle));
+                }
+            });
+            ui.label(egui::RichText::new("Legs").color(theme::muted()));
+            ui.horizontal_wrapped(|ui| {
+                for style in [
+                    LegStyle::Plastic100,
+                    LegStyle::Plastic150,
+                    LegStyle::Metal100,
+                    LegStyle::Metal150,
+                    LegStyle::Wood100,
+                ] {
+                    if ui.button(style.label()).clicked() {
+                        let count = plan
+                            .boards
+                            .iter()
+                            .filter(|board| board.role == CustomRole::Leg)
+                            .count();
+                        push_board(plan, CustomBoard::leg_at(style, count));
+                    }
+                }
+            });
+            if ui.button("Add drawer").clicked() {
+                let count = plan
+                    .boards
+                    .iter()
+                    .filter(|board| board.role == CustomRole::Drawer)
+                    .count();
+                let set = CustomBoard::drawer_set(count);
+                plan.boards.extend(set);
+                plan.selected = Some(plan.boards.len() - 1);
+                plan.mesh_dirty = true;
+            }
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("In this block")
+                    .strong()
+                    .color(theme::heading()),
+            );
+            if plan.boards.is_empty() {
+                ui.label(
+                    egui::RichText::new("Nothing added yet.")
+                        .color(theme::muted()),
+                );
+            } else {
+                let mut remove = None;
+                for (index, board) in plan.boards.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let title = if board.shape == BoardShape::Box {
+                            board.role.label().to_owned()
+                        } else {
+                            format!("{} · {}", board.role.label(), board.shape.label())
+                        };
+                        if ui
+                            .selectable_label(plan.selected == Some(index), title)
+                            .clicked()
+                        {
+                            plan.selected = Some(index);
+                        }
+                        if ui.button("Delete").clicked() {
+                            remove = Some(index);
+                        }
+                    });
+                }
+                if let Some(index) = remove {
+                    plan.remove_board(index);
+                }
+            }
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new("Saved types")
@@ -147,10 +222,50 @@ fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLib
                         && plan.boards[index].role != role
                     {
                         plan.boards[index].role = role;
+                        if role == CustomRole::Leg && plan.boards[index].leg == LegStyle::None {
+                            plan.boards[index].leg = LegStyle::Plastic100;
+                        }
                         plan.mesh_dirty = true;
                     }
                 }
             });
+            ui.label(egui::RichText::new("Shape").color(theme::muted()));
+            ui.horizontal_wrapped(|ui| {
+                for shape in BoardShape::ALL {
+                    if ui
+                        .selectable_label(plan.boards[index].shape == shape, shape.label())
+                        .clicked()
+                        && plan.boards[index].shape != shape
+                    {
+                        plan.boards[index].shape = shape;
+                        plan.boards[index].rest_on_floor();
+                        plan.mesh_dirty = true;
+                    }
+                }
+            });
+            if plan.boards[index].role == CustomRole::Leg {
+                ui.label(egui::RichText::new("Leg type").color(theme::muted()));
+                ui.horizontal_wrapped(|ui| {
+                    for style in [
+                        LegStyle::Plastic100,
+                        LegStyle::Plastic150,
+                        LegStyle::Metal100,
+                        LegStyle::Metal150,
+                        LegStyle::Wood100,
+                    ] {
+                        if ui
+                            .selectable_label(plan.boards[index].leg == style, style.label())
+                            .clicked()
+                            && plan.boards[index].leg != style
+                        {
+                            plan.boards[index].leg = style;
+                            plan.boards[index].height_mm = style.height_mm().max(40.0);
+                            plan.boards[index].rest_on_floor();
+                            plan.mesh_dirty = true;
+                        }
+                    }
+                });
+            }
             let board = &mut plan.boards[index];
             if deg_field(ui, "Yaw", &mut board.yaw_deg)
                 | deg_field(ui, "Pitch", &mut board.pitch_deg)
@@ -165,12 +280,44 @@ fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLib
                 board.rest_on_floor();
                 plan.mesh_dirty = true;
             }
-            if ui.button("Remove board").clicked() {
-                plan.boards.remove(index);
-                plan.selected = None;
+            if board.shape == BoardShape::Box
+                && (mm_field(ui, "Hole W", &mut board.hole_width_mm)
+                    | mm_field(ui, "Hole H", &mut board.hole_height_mm)
+                    | mm_field(ui, "Hole X", &mut board.hole_x_mm)
+                    | mm_field(ui, "Hole Y", &mut board.hole_y_mm))
+            {
                 plan.mesh_dirty = true;
             }
+            if plan.boards[index].shape == BoardShape::Box {
+                ui.label(
+                    egui::RichText::new(
+                        "The hole is cut through the depth. Set either size to 0 mm for a solid board.",
+                    )
+                    .color(theme::muted()),
+                );
+            }
+            if ui.button("Delete board").clicked() {
+                plan.remove_board(index);
+            }
         });
+}
+
+fn push_board(plan: &mut ComponentPlan, board: CustomBoard) {
+    plan.boards.push(board);
+    plan.selected = Some(plan.boards.len() - 1);
+    plan.mesh_dirty = true;
+}
+
+fn triangle_wall(shape: BoardShape) -> CustomBoard {
+    let mut board = CustomRole::Wall.default_board();
+    board.shape = shape;
+    board.width_mm = 564.0;
+    board.height_mm = 220.0;
+    board.depth_mm = 18.0;
+    board.x_mm = 0.0;
+    board.y_mm = 830.0;
+    board.z_mm = -271.0;
+    board
 }
 
 fn deg_field(ui: &mut egui::Ui, label: &str, value: &mut f32) -> bool {

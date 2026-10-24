@@ -6,7 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::EguiContext;
 
 use crate::layout::model::{
-    mm_to_m, ray_aabb, ray_horizontal_plane, snap_to_step, wrap_degrees, CustomBoard, Editor,
+    mm_to_m, ray_aabb, ray_horizontal_plane, shape_mesh, snap_to_step, wrap_degrees, CustomBoard,
+    CustomRole, Editor, LegStyle,
 };
 
 /// Gizmos for the component stage only, so the room camera does not draw them.
@@ -64,7 +65,7 @@ pub fn pointer(
                 plan.orbit.distance = (plan.orbit.distance * factor).clamp(0.4, 12.0);
             }
             if let Some(button) = just_pressed(&mouse) {
-                begin_drag(&mut plan, button, cursor, camera, camera_transform);
+                begin_drag(&mut plan, button, cursor, camera, camera_transform, &keys);
             }
         }
     }
@@ -99,16 +100,47 @@ pub fn sync_preview(
             RenderLayers::layer(BUILDER_LAYER),
         ));
         for board in &boards {
-            parent.spawn((
-                Mesh3d(meshes.add(Cuboid::new(
-                    mm_to_m(board.width_mm).max(0.001),
-                    mm_to_m(board.height_mm).max(0.001),
-                    mm_to_m(board.depth_mm).max(0.001),
-                ))),
-                MeshMaterial3d(shades.wood.clone()),
-                board_transform(board),
-                RenderLayers::layer(BUILDER_LAYER),
-            ));
+            let material = match board.role {
+                CustomRole::Leg if board.leg == LegStyle::Wood100 => shades.wood.clone(),
+                CustomRole::Leg if matches!(board.leg, LegStyle::Metal100 | LegStyle::Metal150) => {
+                    shades.metal.clone()
+                }
+                CustomRole::Leg => shades.plastic.clone(),
+                _ => shades.wood.clone(),
+            };
+            let pieces = board.pieces_mm();
+            let shape = if pieces.len() == 1 {
+                board.shape
+            } else {
+                crate::layout::model::BoardShape::Box
+            };
+            parent
+                .spawn((
+                    board_transform(board),
+                    Visibility::default(),
+                    RenderLayers::layer(BUILDER_LAYER),
+                ))
+                .with_children(|part| {
+                    for (size_mm, offset_mm) in pieces {
+                        part.spawn((
+                            Mesh3d(meshes.add(shape_mesh(
+                                shape,
+                                Vec3::new(
+                                    mm_to_m(size_mm.x),
+                                    mm_to_m(size_mm.y),
+                                    mm_to_m(size_mm.z),
+                                ),
+                            ))),
+                            MeshMaterial3d(material.clone()),
+                            Transform::from_translation(Vec3::new(
+                                mm_to_m(offset_mm.x),
+                                mm_to_m(offset_mm.y),
+                                mm_to_m(offset_mm.z),
+                            )),
+                            RenderLayers::layer(BUILDER_LAYER),
+                        ));
+                    }
+                });
         }
     });
 }
@@ -228,6 +260,8 @@ fn wire_box(
 pub struct Shades {
     wood: Handle<StandardMaterial>,
     floor: Handle<StandardMaterial>,
+    plastic: Handle<StandardMaterial>,
+    metal: Handle<StandardMaterial>,
 }
 
 impl Shades {
@@ -243,6 +277,8 @@ impl Shades {
         Self {
             wood: mat(materials, Color::srgb(0.62, 0.46, 0.28)),
             floor: mat(materials, Color::srgb(0.78, 0.76, 0.72)),
+            plastic: mat(materials, Color::srgb(0.22, 0.22, 0.24)),
+            metal: mat(materials, Color::srgb(0.62, 0.64, 0.66)),
         }
     }
 }
@@ -253,6 +289,7 @@ fn begin_drag(
     cursor: Vec2,
     camera: &Camera,
     transform: &GlobalTransform,
+    keys: &ButtonInput<KeyCode>,
 ) {
     plan.drag = BuilderDrag {
         button,
@@ -260,8 +297,20 @@ fn begin_drag(
         moved: 0.0,
         ..BuilderDrag::default()
     };
-    if button == MouseButton::Right || button == MouseButton::Middle {
+    let space = keys.pressed(KeyCode::Space);
+    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    // Same buttons as the room: right-drag, Shift+middle, and Space+left pan.
+    // Middle-drag and Alt+left orbit, even when the cursor is on a board.
+    if button == MouseButton::Right
+        || (button == MouseButton::Middle && shift)
+        || (button == MouseButton::Left && space)
+    {
         plan.drag.kind = DragKind::Pan;
+        return;
+    }
+    if button == MouseButton::Middle || (button == MouseButton::Left && alt) {
+        plan.drag.kind = DragKind::Orbit;
         return;
     }
     let Some((origin, direction)) = ray_from(camera, transform, cursor) else {
@@ -345,6 +394,28 @@ fn m_to_mm(meters: f32) -> f32 {
     meters * 1000.0
 }
 
+fn pan_builder(orbit: &mut super::BuilderOrbit, keys: &ButtonInput<KeyCode>) -> bool {
+    let mut x = 0.0;
+    let mut y = 0.0;
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        x -= 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        x += 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) {
+        y += 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) {
+        y -= 1.0;
+    }
+    if x == 0.0 && y == 0.0 {
+        return false;
+    }
+    orbit.pan_screen(x, y);
+    true
+}
+
 fn local_center(board: &CustomBoard) -> Vec3 {
     Vec3::new(
         mm_to_m(board.x_mm),
@@ -377,18 +448,32 @@ pub fn nudge_selection(
     if !window.focused || plan.drag.kind != DragKind::Idle {
         return;
     }
-    if window
-        .cursor_position()
-        .is_some_and(|cursor| over_panels(cursor, &chrome))
-    {
-        return;
-    }
     if contexts
         .iter_mut()
         .next()
         .is_some_and(|mut context| context.get_mut().egui_wants_keyboard_input())
     {
         return;
+    }
+    if (keys.just_pressed(KeyCode::Delete) || keys.just_pressed(KeyCode::Backspace))
+        && plan.selected.is_some()
+    {
+        if let Some(index) = plan.selected {
+            plan.remove_board(index);
+        }
+        return;
+    }
+    if window
+        .cursor_position()
+        .is_some_and(|cursor| over_panels(cursor, &chrome))
+    {
+        return;
+    }
+    let control = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if plan.selected.is_none() || control {
+        if pan_builder(&mut plan.orbit, &keys) || plan.selected.is_none() {
+            return;
+        }
     }
     let Some(index) = plan.selected.filter(|index| *index < plan.boards.len()) else {
         return;
