@@ -320,6 +320,9 @@ pub fn shortcuts(
                 orbit.frame_room(&room);
             }
         }
+        if let Ok(mut orbit) = camera.single_mut() {
+            pan_camera(&mut orbit, &keys);
+        }
         return;
     }
 
@@ -347,8 +350,11 @@ pub fn shortcuts(
                 let mut copy = furniture.clone();
                 copy.dirty = true;
                 copy.name = format!("{} copy", copy.name);
-                let mut placed = *transform;
-                placed.translation.x += 0.1;
+                let placed = place_at_center(
+                    &room,
+                    m_to_mm(transform.translation.y),
+                    quarter_turns(transform.rotation),
+                );
                 copies.push(commands.spawn((copy, placed)).id());
             }
         }
@@ -379,6 +385,13 @@ pub fn shortcuts(
                 );
             }
         }
+    }
+
+    if control_held(&keys) {
+        if let Ok(mut orbit) = camera.single_mut() {
+            pan_camera(&mut orbit, &keys);
+        }
+        return;
     }
 
     let step = if editor.snap_enabled {
@@ -722,7 +735,6 @@ pub fn sidebar(
                         ui.separator();
                         ui.strong("Utility pipes");
                         ui.weak("Drag pipes like cabinets while room editing is on.");
-                        let existing = pieces.iter().len();
                         ui.horizontal(|ui| {
                             for (label, horizontal) in
                                 [("Add vertical pipe", false), ("Add horizontal pipe", true)]
@@ -733,13 +745,8 @@ pub fn sidebar(
                                         count: 1,
                                         color: PipeColor::Gray,
                                     };
-                                    let entity = add_piece(
-                                        &mut commands,
-                                        &room,
-                                        kind,
-                                        Placement::Floor,
-                                        existing,
-                                    );
+                                    let entity =
+                                        add_piece(&mut commands, &room, kind, Placement::Floor);
                                     selection.set_only(entity);
                                 }
                             }
@@ -748,7 +755,6 @@ pub fn sidebar(
                 });
 
                 dropdown(ui, "Add Furniture", false, |ui| {
-                    let existing = pieces.iter().len();
                     ui.strong("Floor");
                     for (label, kind) in [
                         ("Drawer Base Cabinet", Kind::Drawers { count: 3 }),
@@ -770,8 +776,7 @@ pub fn sidebar(
                         ("Work Table", Kind::Table),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity =
-                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
+                            let entity = add_piece(&mut commands, &room, kind, Placement::Floor);
                             selection.set_only(entity);
                         }
                     }
@@ -795,8 +800,7 @@ pub fn sidebar(
                         ),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity =
-                                add_piece(&mut commands, &room, kind, Placement::Wall, existing);
+                            let entity = add_piece(&mut commands, &room, kind, Placement::Wall);
                             selection.set_only(entity);
                         }
                     }
@@ -808,10 +812,9 @@ pub fn sidebar(
                             "Save a block in the Component planner and it will be listed here.",
                         );
                     } else {
-                        let existing = pieces.iter().len();
                         for block in &library.types {
                             if library_button(ui, block.name.as_str(), Kind::Custom).clicked() {
-                                let entity = add_custom(&mut commands, &room, block, existing);
+                                let entity = add_custom(&mut commands, &room, block);
                                 selection.set_only(entity);
                             }
                         }
@@ -819,21 +822,18 @@ pub fn sidebar(
                 });
 
                 dropdown(ui, "Add Surfaces", false, |ui| {
-                    let existing = pieces.iter().len();
                     for (label, kind) in [
                         ("Kitchen Worktop", Kind::Countertop),
                         ("Tabletop", Kind::Tabletop),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity =
-                                add_piece(&mut commands, &room, kind, Placement::Floor, existing);
+                            let entity = add_piece(&mut commands, &room, kind, Placement::Floor);
                             selection.set_only(entity);
                         }
                     }
                 });
 
                 dropdown(ui, "Add Appliances", false, |ui| {
-                    let existing = pieces.iter().len();
                     for (label, kind, placement) in [
                         ("Refrigerator", Kind::Refrigerator, Placement::Floor),
                         ("Dishwasher", Kind::Dishwasher, Placement::Floor),
@@ -860,7 +860,7 @@ pub fn sidebar(
                         ("Air Conditioner", Kind::AirConditioner, Placement::Wall),
                     ] {
                         if library_button(ui, label, kind).clicked() {
-                            let entity = add_piece(&mut commands, &room, kind, placement, existing);
+                            let entity = add_piece(&mut commands, &room, kind, placement);
                             selection.set_only(entity);
                         }
                     }
@@ -946,6 +946,7 @@ pub fn sidebar(
                     &mut commands,
                     &mut pieces,
                     &mut selection,
+                    &room,
                 );
             });
         chrome_right = docked.response.rect.right();
@@ -1271,6 +1272,7 @@ fn draw_properties_panel(
     commands: &mut Commands,
     pieces: &mut Query<(Entity, &mut Furniture, &mut Transform)>,
     selection: &mut Selection,
+    room: &Room,
 ) {
     ui.horizontal(|ui| {
         ui.label(
@@ -1310,6 +1312,7 @@ fn draw_properties_panel(
                 selection,
                 target,
                 &mut properties.materials_detail,
+                room,
             );
         });
 }
@@ -1371,31 +1374,14 @@ fn mm_row(
     .changed()
 }
 
-fn add_piece(
-    commands: &mut Commands,
-    room: &Room,
-    kind: Kind,
-    placement: Placement,
-    already_there: usize,
-) -> Entity {
+fn add_piece(commands: &mut Commands, room: &Room, kind: Kind, placement: Placement) -> Entity {
     let (furniture, y_mm) = kind.preset(placement);
-    // Step new pieces sideways so a second cabinet does not hide inside the first.
-    let column = (already_there % 4) as f32;
-    let x_mm = room.width_mm * 0.5 + (column - 1.5) * 180.0;
-    let z_mm = if kind.is_pipe() {
-        furniture.depth_mm * 0.5 + 10.0
-    } else {
-        room.depth_mm * 0.55
-    };
-    commands.spawn((furniture, place(x_mm, y_mm, z_mm, 0))).id()
+    commands
+        .spawn((furniture, place_at_center(room, y_mm, 0)))
+        .id()
 }
 
-fn add_custom(
-    commands: &mut Commands,
-    room: &Room,
-    block: &CustomType,
-    already_there: usize,
-) -> Entity {
+fn add_custom(commands: &mut Commands, room: &Room, block: &CustomType) -> Entity {
     let mut furniture = Furniture::new(
         Kind::Custom,
         block.width_mm,
@@ -1407,10 +1393,45 @@ fn add_custom(
     furniture.placement = Placement::Floor;
     furniture.legs = LegStyle::Plastic100;
     furniture.ensure_front_finishes();
-    let column = (already_there % 4) as f32;
-    let x_mm = room.width_mm * 0.5 + (column - 1.5) * 180.0;
-    let z_mm = room.depth_mm * 0.55;
-    commands.spawn((furniture, place(x_mm, 0.0, z_mm, 0))).id()
+    commands
+        .spawn((furniture, place_at_center(room, 0.0, 0)))
+        .id()
+}
+
+/// Footprint centre of the room. Height and facing stay with the piece.
+fn place_at_center(room: &Room, y_mm: f32, turns: u8) -> Transform {
+    place(room.width_mm * 0.5, y_mm, room.depth_mm * 0.5, turns)
+}
+
+fn control_held(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)
+}
+
+/// Slide the camera the way a right-drag does: left and right across the
+/// view, up and down toward the top and bottom of the screen.
+fn pan_camera(orbit: &mut OrbitCamera, keys: &ButtonInput<KeyCode>) {
+    let mut x = 0.0;
+    let mut y = 0.0;
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        x -= 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        x += 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) {
+        y += 1.0;
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) {
+        y -= 1.0;
+    }
+    if x == 0.0 && y == 0.0 {
+        return;
+    }
+    let pose = orbit.pose();
+    let right = pose.rotation * Vec3::X;
+    let up = pose.rotation * Vec3::Y;
+    let step = (orbit.distance * 0.08).clamp(0.05, 2.0);
+    orbit.focus += right * x * step + up * y * step;
 }
 
 fn draw_pipe_size(ui: &mut egui::Ui, furniture: &mut Furniture) {
@@ -1458,6 +1479,7 @@ fn draw_properties(
     selection: &mut Selection,
     entity: Entity,
     materials_detail: &mut bool,
+    room: &Room,
 ) {
     let Ok((_, mut furniture, mut transform)) = pieces.get_mut(entity) else {
         return;
@@ -1817,9 +1839,11 @@ fn draw_properties(
         if ui.button("Duplicate").clicked() {
             let mut copy = furniture.clone();
             copy.dirty = true;
-            let mut placed = *transform;
-            placed.translation +=
-                transform.rotation * Vec3::X * (mm_to_m(furniture.width_mm) + 0.02);
+            let placed = place_at_center(
+                room,
+                m_to_mm(transform.translation.y),
+                quarter_turns(transform.rotation),
+            );
             duplicate = Some((copy, placed));
         }
         if ui.button("Delete").clicked() {

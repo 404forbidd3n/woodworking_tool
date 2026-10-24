@@ -34,6 +34,8 @@ This document is the living specification for the implemented application.
 
 ## 3. Main window
 
+The main window opens fullscreen on the primary monitor.
+
 ### 3.1 Top toolbar
 
 The toolbar displays the active project filename and provides:
@@ -188,6 +190,10 @@ top colour.
 
 ## 6. Selection and editing
 
+Adding a piece from the sidebar, or duplicating one with D or Properties, puts
+its footprint at the centre of the floor. Wall cabinets stay at their mounting
+height. Horizontal pipes stay 500 mm up. A duplicate keeps its height and facing.
+
 ### 6.1 Pointer controls
 
 - Left-drag a piece — move it across the floor.
@@ -207,7 +213,9 @@ relative positions.
 - R — rotate selected pieces by 90°.
 - D — duplicate selected pieces.
 - Delete/Backspace — remove selected pieces.
-- Arrow keys — nudge selected pieces.
+- Arrow keys — nudge selected pieces. With nothing selected, or while Ctrl is
+  held, the same keys pan the camera left, right, up, and down, the same way a
+  right-drag does.
 - Page Up/Page Down — move selected pieces vertically.
 - F — frame the room or selected piece.
 - Cmd/Ctrl+Z — undo.
@@ -289,7 +297,7 @@ overlapping openings form the union of their holes.
 
 Pipes only mark obstacles in the space, so they are kept simple. The Room
 section offers **Add vertical pipe** and **Add horizontal pipe**; a new pipe is
-placed against the back wall.
+placed at the centre of the floor.
 
 Pipes are pieces like furniture: while room editing is enabled they can be
 clicked, dragged (Shift-drag to raise or lower), rotated with R, duplicated
@@ -394,12 +402,13 @@ Each part has:
 - width and height;
 - quantity.
 
-The list is split into two tabs:
+The list is split into three tabs:
 
 - **Doors** — doors and drawer fronts. Each row starts with a Door or Drawer tag. These are often a different sheet, such as MDF.
-- **Parts** — sides, tops, bottoms, shelves, backs, dividers, and other carcass pieces. Each row starts with its role tag.
+- **Backs** — cabinet backs. Each row starts with a Back tag. These are often a thinner board, not the carcass sheet and not the door face.
+- **Parts** — sides, tops, bottoms, shelves, dividers, and other carcass pieces. Each row starts with its role tag.
 
-Each row shows the tag, the quantity and name, and the size in millimetres. A row can be removed on its own. **Clear doors** or **Clear parts** drops only the open tab. **Clear list** drops both. Importing the room still adds every cut piece from the cabinets into the matching tab. Estimate packs whatever is still in either tab, so clearing Doors leaves only the carcass on the sheet.
+Each row shows the tag, the quantity and name, and the size in millimetres. A row can be removed on its own. **Clear doors**, **Clear backs**, or **Clear parts** drops only the open tab. **Clear list** drops all three. A back can be added by hand with kind Back, or removed on its own, the same way as a door. Importing the room still adds every cut piece from the cabinets into the matching tab. Estimate packs whatever is still in any tab, so clearing Doors and Backs leaves only the carcass on the sheet.
 
 Parts can be entered manually or imported from furniture in the room.
 Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
@@ -407,8 +416,8 @@ A corner cabinet contributes an approximate list: sides, top, bottom, back,
 two doors, and, for the shelf style, two shelves. A glass door is still listed
 as a door; the pane is bought, not cut from the sheet. A custom block
 contributes one rectangle per board, using that board's own size after the
-piece is scaled. Doors go to the Doors tab. A wall is a side, a plank is a
-shelf, and a bottom, top, or back keeps that role.
+piece is scaled. Doors go to the Doors tab and backs go to the Backs tab. A wall is a side,
+a plank is a shelf, and a bottom or top keeps that role.
 
 ### 11.3 Estimate and canvas
 
@@ -503,8 +512,11 @@ A release is acceptable when:
 - the project builds without compiler warnings;
 - all unit tests pass;
 - v1, v2, and v3 projects load safely;
-- the main window, the cut planner, and the component planner open without
-  panic or Egui pass errors;
+- the main window opens fullscreen on the primary monitor, and the cut planner
+  and the component planner open without panic or Egui pass errors;
+- a newly added or duplicated piece appears at the centre of the floor;
+- the cut list keeps backs on their own tab, separate from doors and carcass
+  parts;
 - save, Save As, and Load preserve room, furniture, materials, openings,
   utility pipes, and cut-list data;
 - undo/redo restore complete layout edits;

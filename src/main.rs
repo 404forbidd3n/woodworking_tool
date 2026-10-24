@@ -17,6 +17,7 @@ mod layout;
 mod theme;
 
 use bevy::prelude::*;
+use bevy::window::{MonitorSelection, WindowMode};
 use bevy::winit::WinitSettings;
 use bevy_egui::EguiPlugin;
 
@@ -58,6 +59,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Woodworking layout".into(),
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
                 ..default()
             }),
             ..default()

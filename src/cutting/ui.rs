@@ -127,6 +127,7 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
                 if !showing {
                     let empty = match group {
                         CutListGroup::Doors => "No doors or drawer fronts yet.",
+                        CutListGroup::Backs => "No backs yet.",
                         CutListGroup::Parts => "No carcass parts yet.",
                     };
                     ui.label(empty);
@@ -148,6 +149,7 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
                 ui.horizontal(|ui| {
                     let clear_label = match group {
                         CutListGroup::Doors => "Clear doors",
+                        CutListGroup::Backs => "Clear backs",
                         CutListGroup::Parts => "Clear parts",
                     };
                     if ui.button(clear_label).clicked() {
@@ -194,25 +196,59 @@ fn draw_draft(ui: &mut egui::Ui, job: &mut CutJob) {
 }
 
 fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
-    let doors = job.parts.iter().filter(|part| part.role.is_front()).count();
-    let carcass = job.parts.len() - doors;
-    ui.horizontal(|ui| {
-        ui.selectable_value(
-            &mut job.list_group,
-            CutListGroup::Doors,
-            format!("Doors ({doors})"),
-        );
-        ui.selectable_value(
-            &mut job.list_group,
-            CutListGroup::Parts,
-            format!("Parts ({carcass})"),
-        );
+    let doors = job
+        .parts
+        .iter()
+        .filter(|part| part.role.group() == CutListGroup::Doors)
+        .count();
+    let backs = job
+        .parts
+        .iter()
+        .filter(|part| part.role.group() == CutListGroup::Backs)
+        .count();
+    let carcass = job.parts.len() - doors - backs;
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .selectable_value(
+                &mut job.list_group,
+                CutListGroup::Doors,
+                format!("Doors ({doors})"),
+            )
+            .clicked()
+            && !job.draft_role.is_front()
+        {
+            job.draft_role = PartRole::Door;
+        }
+        if ui
+            .selectable_value(
+                &mut job.list_group,
+                CutListGroup::Backs,
+                format!("Backs ({backs})"),
+            )
+            .clicked()
+        {
+            job.draft_role = PartRole::Back;
+        }
+        if ui
+            .selectable_value(
+                &mut job.list_group,
+                CutListGroup::Parts,
+                format!("Parts ({carcass})"),
+            )
+            .clicked()
+            && job.draft_role.group() != CutListGroup::Parts
+        {
+            job.draft_role = PartRole::Side;
+        }
     });
     let note = match job.list_group {
         CutListGroup::Doors => {
-            "Doors and drawer fronts. These are often MDF, not the carcass sheet."
+            "Doors and drawer fronts. These are often a different sheet, such as MDF."
         }
-        CutListGroup::Parts => "Sides, tops, bottoms, shelves, backs, and the rest of the carcass.",
+        CutListGroup::Backs => {
+            "Backs. These are often a thinner board, not the carcass or the door face."
+        }
+        CutListGroup::Parts => "Sides, tops, bottoms, shelves, and the rest of the carcass.",
     };
     ui.weak(note);
 }

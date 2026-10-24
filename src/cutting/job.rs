@@ -73,17 +73,20 @@ impl PartRole {
     pub fn group(self) -> CutListGroup {
         if self.is_front() {
             CutListGroup::Doors
+        } else if self == PartRole::Back {
+            CutListGroup::Backs
         } else {
             CutListGroup::Parts
         }
     }
 }
 
-/// The two lists inside the cut planner. Fronts stay apart from the carcass
-/// so a whole group can be dropped after the room is imported.
+/// The lists inside the cut planner. Fronts and backs stay apart from the
+/// carcass because each is usually a different sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CutListGroup {
     Doors,
+    Backs,
     Parts,
 }
 
@@ -149,7 +152,7 @@ pub struct CutJob {
     pub draft_width_mm: f32,
     pub draft_height_mm: f32,
     pub draft_quantity: u32,
-    /// Which of the two lists is open. Not saved; it is only the open tab.
+    /// Which list is open. Not saved; it is only the open tab.
     pub list_group: CutListGroup,
     /// Which packed board is on screen when the estimate needs more than one.
     pub sheet_page: usize,
@@ -254,7 +257,7 @@ impl CutJob {
         self.mark_stale();
     }
 
-    /// Drop every door and drawer front, or every carcass part, and leave the other list.
+    /// Drop one material group and leave the others.
     pub fn clear_group(&mut self, group: CutListGroup) {
         let before = self.parts.len();
         self.parts.retain(|part| part.role.group() != group);
@@ -283,8 +286,10 @@ mod tests {
         assert!(PartRole::Door.is_front());
         assert!(PartRole::DrawerFront.is_front());
         assert!(!PartRole::Side.is_front());
+        assert!(!PartRole::Back.is_front());
         assert!(!PartRole::Shelf.is_front());
         assert_eq!(PartRole::DrawerFront.group(), CutListGroup::Doors);
+        assert_eq!(PartRole::Back.group(), CutListGroup::Backs);
         assert_eq!(PartRole::Top.group(), CutListGroup::Parts);
     }
 
@@ -294,10 +299,14 @@ mod tests {
         job.parts = vec![
             part(PartRole::Door),
             part(PartRole::DrawerFront),
+            part(PartRole::Back),
             part(PartRole::Side),
             part(PartRole::Shelf),
         ];
         job.clear_group(CutListGroup::Doors);
+        let roles: Vec<_> = job.parts.iter().map(|part| part.role).collect();
+        assert_eq!(roles, vec![PartRole::Back, PartRole::Side, PartRole::Shelf]);
+        job.clear_group(CutListGroup::Backs);
         let roles: Vec<_> = job.parts.iter().map(|part| part.role).collect();
         assert_eq!(roles, vec![PartRole::Side, PartRole::Shelf]);
         job.clear_group(CutListGroup::Parts);
