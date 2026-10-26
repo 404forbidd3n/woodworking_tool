@@ -34,6 +34,7 @@ pub struct CutPlannerWindow;
 #[derive(Component)]
 pub struct CutPlannerCamera;
 
+/// Entities of the open cut planner window, and whether one was requested.
 #[derive(Resource, Default)]
 pub struct CutWindow {
     window: Option<Entity>,
@@ -41,6 +42,7 @@ pub struct CutWindow {
     requested: bool,
 }
 
+/// Ask for the cut planner window. It opens on the next `Update`.
 pub fn request_open(state: &mut CutWindow) {
     state.requested = true;
 }

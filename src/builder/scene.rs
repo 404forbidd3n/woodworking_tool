@@ -20,8 +20,14 @@ use super::{
     ComponentPlannerWindow, ComponentWindow, DragKind, BUILDER_LAYER, BUILDER_OFFSET,
 };
 
+/// Grid step for dragging boards in the planner, in millimeters.
 const SNAP_MM: f32 = 10.0;
 
+/// System: mouse input in the planner window.
+///
+/// While a drag is active it is applied every frame until the button is
+/// released. Otherwise a scroll zooms, and a press starts a new drag
+/// (see [`begin_drag`]). The camera transform is rewritten at the end.
 pub fn pointer(
     mut plan: ResMut<ComponentPlan>,
     mut camera: Query<(&Camera, &GlobalTransform, &mut Transform), With<ComponentPlannerCamera>>,
@@ -73,6 +79,11 @@ pub fn pointer(
     *transform = plan.orbit.pose();
 }
 
+/// System: rebuild the preview meshes when `plan.mesh_dirty` is set.
+///
+/// Every board becomes a parent entity with the board's position and
+/// rotation, and one child mesh per piece (a board with a hole is several
+/// pieces). A floor slab is added under everything.
 pub fn sync_preview(
     mut commands: Commands,
     mut plan: ResMut<ComponentPlan>,
@@ -145,6 +156,7 @@ pub fn sync_preview(
     });
 }
 
+/// Startup system: draw [`BuilderGizmos`] only on the planner's layer.
 pub fn configure_gizmos(mut store: ResMut<GizmoConfigStore>) {
     let (config, _) = store.config_mut::<BuilderGizmos>();
     config.render_layers = RenderLayers::layer(BUILDER_LAYER);
@@ -220,6 +232,7 @@ pub fn draw_stage(
     );
 }
 
+/// Twelve edges of a box, transformed onto the planner stage.
 fn wire_box(
     gizmos: &mut Gizmos<BuilderGizmos>,
     transform: &GlobalTransform,
@@ -257,6 +270,8 @@ fn wire_box(
     }
 }
 
+/// The few materials the planner preview uses. Created once and kept in a
+/// `Local` inside [`sync_preview`].
 pub struct Shades {
     wood: Handle<StandardMaterial>,
     floor: Handle<StandardMaterial>,
@@ -283,6 +298,9 @@ impl Shades {
     }
 }
 
+/// Decide what a mouse press starts. Pan and orbit follow the same buttons
+/// as the room. A left press on a board selects it and starts moving it;
+/// a left press on empty space orbits.
 fn begin_drag(
     plan: &mut ComponentPlan,
     button: MouseButton,
@@ -331,6 +349,8 @@ fn begin_drag(
     }
 }
 
+/// Apply one frame of the current drag. Moving snaps to [`SNAP_MM`] and
+/// never sinks a board below the floor. Holding Shift lifts instead of slides.
 fn apply_drag(
     plan: &mut ComponentPlan,
     camera: &Camera,
@@ -390,10 +410,12 @@ fn apply_drag(
     }
 }
 
+/// Meters to millimeters.
 fn m_to_mm(meters: f32) -> f32 {
     meters * 1000.0
 }
 
+/// Arrow-key pan. Returns `true` if any arrow was pressed.
 fn pan_builder(orbit: &mut super::BuilderOrbit, keys: &ButtonInput<KeyCode>) -> bool {
     let mut x = 0.0;
     let mut y = 0.0;
@@ -416,6 +438,7 @@ fn pan_builder(orbit: &mut super::BuilderOrbit, keys: &ButtonInput<KeyCode>) -> 
     true
 }
 
+/// Board center in meters, relative to the stage origin.
 fn local_center(board: &CustomBoard) -> Vec3 {
     Vec3::new(
         mm_to_m(board.x_mm),
@@ -424,6 +447,7 @@ fn local_center(board: &CustomBoard) -> Vec3 {
     )
 }
 
+/// Position and rotation of a board on the stage.
 fn board_transform(board: &CustomBoard) -> Transform {
     Transform {
         translation: local_center(board),
@@ -519,6 +543,7 @@ pub fn nudge_selection(
     }
 }
 
+/// The board nearest the camera under a ray, if any.
 fn pick_board(origin: Vec3, direction: Vec3, boards: &[CustomBoard]) -> Option<usize> {
     let mut best_distance = f32::MAX;
     let mut best = None;
@@ -536,6 +561,7 @@ fn pick_board(origin: Vec3, direction: Vec3, boards: &[CustomBoard]) -> Option<u
     best
 }
 
+/// World-space ray through a cursor position, as (origin, normalized direction).
 fn ray_from(camera: &Camera, transform: &GlobalTransform, cursor: Vec2) -> Option<(Vec3, Vec3)> {
     let ray = camera.viewport_to_world(transform, cursor).ok()?;
     let direction =
@@ -547,10 +573,12 @@ fn ray_from(camera: &Camera, transform: &GlobalTransform, cursor: Vec2) -> Optio
     }
 }
 
+/// True when the cursor is over the egui toolbar or sidebar.
 fn over_panels(cursor: Vec2, chrome: &BuilderChrome) -> bool {
     cursor.x < chrome.sidebar || cursor.y < chrome.toolbar
 }
 
+/// Scroll amount in lines, whether the device reports lines or pixels.
 fn scroll_lines(scroll: &AccumulatedMouseScroll) -> f32 {
     match scroll.unit {
         MouseScrollUnit::Line => scroll.delta.y,
@@ -558,6 +586,7 @@ fn scroll_lines(scroll: &AccumulatedMouseScroll) -> f32 {
     }
 }
 
+/// The mouse button pressed this frame, if any.
 fn just_pressed(mouse: &ButtonInput<MouseButton>) -> Option<MouseButton> {
     if mouse.just_pressed(MouseButton::Left) {
         Some(MouseButton::Left)

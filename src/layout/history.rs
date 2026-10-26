@@ -9,8 +9,14 @@ use bevy::prelude::*;
 use super::model::{Editor, Furniture, Room};
 use super::project::{self, LayoutSnapshot};
 
+/// How many undo steps are kept.
 const HISTORY_LIMIT: usize = 10;
 
+/// The undo and redo stacks.
+///
+/// - `last_seen` is the state at the end of the previous frame
+/// - `pending_before` is the state from before the change that is still in
+///   progress (a drag that has not been released yet)
 #[derive(Resource, Default)]
 pub struct History {
     undo: Vec<LayoutSnapshot>,
@@ -28,6 +34,8 @@ impl History {
         !self.redo.is_empty()
     }
 
+    /// Step back. `current` goes onto the redo stack, and the returned snapshot
+    /// is what the room should become.
     pub fn undo(&mut self, current: LayoutSnapshot) -> Option<LayoutSnapshot> {
         let target = self.undo.pop()?;
         self.redo.push(current);
@@ -36,6 +44,7 @@ impl History {
         Some(target)
     }
 
+    /// Step forward again. The reverse of [`Self::undo`].
     pub fn redo(&mut self, current: LayoutSnapshot) -> Option<LayoutSnapshot> {
         let target = self.redo.pop()?;
         push_limited(&mut self.undo, current);
@@ -45,6 +54,7 @@ impl History {
     }
 }
 
+/// Push, dropping the oldest entry once [`HISTORY_LIMIT`] is reached.
 fn push_limited(stack: &mut Vec<LayoutSnapshot>, snapshot: LayoutSnapshot) {
     if stack.len() == HISTORY_LIMIT {
         stack.remove(0);

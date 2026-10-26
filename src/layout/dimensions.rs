@@ -9,6 +9,8 @@ use bevy_egui::{egui, EguiContexts};
 use super::model::{mm_to_m, Furniture, Room, WallSide};
 use super::view::OrbitCamera;
 
+/// egui system: a width label under the front of every cabinet, and the room
+/// and opening sizes when "Show room measurements" is on.
 pub fn draw_widths(
     mut contexts: EguiContexts,
     camera: Query<(&Camera, &GlobalTransform), With<OrbitCamera>>,
@@ -141,6 +143,8 @@ fn draw_room(
     }
 }
 
+/// A point on the inside face of a wall: `along_mm` from the wall's start,
+/// `height_mm` above the floor.
 fn wall_point(room: &Room, wall: WallSide, along_mm: f32, height_mm: f32) -> Vec3 {
     let along = mm_to_m(along_mm);
     let height = mm_to_m(height_mm);
@@ -152,6 +156,9 @@ fn wall_point(room: &Room, wall: WallSide, along_mm: f32, height_mm: f32) -> Vec
     }
 }
 
+/// One dimension line between two 3D points: a line with arrowheads and a
+/// "600 mm" label in the middle. Skipped when it is off screen or too short
+/// to read.
 fn draw_dimension(
     painter: &egui::Painter,
     screen: egui::Rect,

@@ -18,6 +18,8 @@ use super::model::{
 };
 use super::view;
 
+/// The whole document at one moment: room, pieces, and snap settings. Used
+/// for undo/redo and for loading a file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutSnapshot {
     pub room: RoomFile,
@@ -26,6 +28,7 @@ pub struct LayoutSnapshot {
     pub snap_mm: f32,
 }
 
+/// Snapshot the live room.
 pub fn capture(
     room: &Room,
     editor: &Editor,
@@ -41,6 +44,7 @@ pub fn capture(
     )
 }
 
+/// Snapshot from already-converted piece records.
 pub fn from_files(room: &Room, editor: &Editor, pieces: Vec<PieceFile>) -> LayoutSnapshot {
     LayoutSnapshot {
         room: view::saved_room(room),
@@ -50,6 +54,7 @@ pub fn from_files(room: &Room, editor: &Editor, pieces: Vec<PieceFile>) -> Layou
     }
 }
 
+/// Snapshot from a loaded project file.
 pub fn from_project(file: &ProjectFile) -> LayoutSnapshot {
     LayoutSnapshot {
         room: file.room.clone(),
@@ -59,6 +64,8 @@ pub fn from_project(file: &ProjectFile) -> LayoutSnapshot {
     }
 }
 
+/// Replace the live room with a snapshot: despawn every existing piece,
+/// apply the room settings, and spawn the snapshot's pieces.
 pub fn restore(
     snapshot: LayoutSnapshot,
     commands: &mut Commands,
@@ -79,12 +86,14 @@ pub fn restore(
     }
 }
 
+/// Which native dialog is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogRequest {
     Save,
     Open,
 }
 
+/// A dialog that is open, and the future that resolves when it closes.
 struct ActiveDialog {
     request: DialogRequest,
     future: Pin<Box<dyn Future<Output = Option<rfd::FileHandle>> + Send>>,
@@ -99,14 +108,17 @@ pub struct NativeDialog {
 }
 
 impl NativeDialog {
+    /// Open a Save As panel starting at `current`.
     pub fn begin_save(&mut self, current: &str) {
         self.begin(DialogRequest::Save, save_dialog(current).save_file());
     }
 
+    /// Open an Open panel in `current`'s folder.
     pub fn begin_open(&mut self, current: &str) {
         self.begin(DialogRequest::Open, open_dialog(current).pick_file());
     }
 
+    /// Store the dialog future. Ignored if a dialog is already open.
     fn begin(
         &mut self,
         request: DialogRequest,
@@ -143,11 +155,13 @@ impl NativeDialog {
         }
     }
 
+    /// Is a dialog showing right now?
     pub fn is_open(&self) -> bool {
         self.active.is_some()
     }
 }
 
+/// The Save As panel, filtered to `.json`, in the current file's folder.
 fn save_dialog(current: &str) -> rfd::AsyncFileDialog {
     let current = Path::new(current);
     let mut dialog = rfd::AsyncFileDialog::new()
@@ -165,6 +179,7 @@ fn save_dialog(current: &str) -> rfd::AsyncFileDialog {
     dialog
 }
 
+/// The Open panel, filtered to `.json`, in the current file's folder.
 fn open_dialog(current: &str) -> rfd::AsyncFileDialog {
     let current = Path::new(current);
     let directory = current
@@ -177,6 +192,7 @@ fn open_dialog(current: &str) -> rfd::AsyncFileDialog {
         .set_directory(directory)
 }
 
+/// Add `.json` when the user typed a name without an extension.
 fn ensure_json_extension(mut path: PathBuf) -> PathBuf {
     if path.extension().is_none() {
         path.set_extension("json");

@@ -22,30 +22,38 @@ pub fn heading() -> egui::Color32 {
     egui::Color32::from_rgb(79, 193, 255)
 }
 
+/// Panel background.
 pub fn paper() -> egui::Color32 {
     egui::Color32::from_rgb(37, 37, 38)
 }
 
+/// Slightly lighter background for tags and the file name chip.
 pub fn chip() -> egui::Color32 {
     egui::Color32::from_rgb(45, 45, 48)
 }
 
+/// Toolbar background and text field wells.
 fn chrome() -> egui::Color32 {
     egui::Color32::from_rgb(30, 30, 30)
 }
 
+/// Thin separators and panel borders.
 fn line() -> egui::Color32 {
     egui::Color32::from_rgb(62, 62, 66)
 }
 
+/// Blue for selected and pressed widgets.
 fn accent() -> egui::Color32 {
     egui::Color32::from_rgb(0, 122, 204)
 }
 
+/// Darker blue behind hovered widgets.
 fn accent_hover() -> egui::Color32 {
     egui::Color32::from_rgb(9, 71, 113)
 }
 
+/// Apply the dark theme and spacing to an egui context. Called at the start
+/// of every egui pass, so a new window picks it up immediately.
 pub fn apply_theme(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = paper();
@@ -94,6 +102,7 @@ pub fn apply_theme(ctx: &egui::Context) {
     });
 }
 
+/// Frame for a window's top toolbar.
 pub fn toolbar_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(chrome())
@@ -101,6 +110,7 @@ pub fn toolbar_frame() -> egui::Frame {
         .stroke(egui::Stroke::new(1.0, accent()))
 }
 
+/// Frame for a sidebar or side panel.
 pub fn sidebar_frame() -> egui::Frame {
     egui::Frame::new()
         .fill(paper())

@@ -4,12 +4,58 @@
 //! center, the cut planner and the component planner. The sidebar holds the
 //! room, the furniture, and the selection.
 //!
-//! Where the code lives:
+//! # Where the code lives
 //!
-//! - `layout` — the 3D room: data, drawing, and the sidebar
-//! - `cutting` — the separate window that nests parts on plywood
-//! - `builder` — the sketch window for a custom furniture block
-//! - `theme` — the shared colors, buttons, and section headers
+//! ```text
+//! src/
+//! ├── main.rs            this file: wires every system into the Bevy app
+//! ├── theme.rs           shared egui colors, frames, and collapsible sections
+//! ├── layout/            the main window: the 3D room
+//! │   ├── model/         pure data and math (no drawing, no input)
+//! │   │   └── geometry/  turns a piece into boxes, one file per furniture family
+//! │   ├── view/          draws the room: camera, meshes, materials, grid
+//! │   ├── edit/          changes the room: mouse, keyboard, sidebar, saving
+//! │   ├── dimensions.rs  the "600 mm" labels under cabinets
+//! │   ├── history.rs     undo / redo
+//! │   └── project.rs     snapshots and the native file dialogs
+//! ├── cutting/           second window: packs panels onto plywood sheets
+//! └── builder/           third window: builds a custom block from boards
+//! ```
+//!
+//! Each folder has a `mod.rs` that explains what is in it, with a table of
+//! its files. That is the standard Rust layout: a folder `foo/` with a
+//! `foo/mod.rs` is the module `foo`.
+//!
+//! # Bevy in two minutes
+//!
+//! The app is built on [Bevy](https://bevyengine.org), an ECS game engine,
+//! plus [egui](https://github.com/emilk/egui) for the panels.
+//!
+//! - An **entity** is an ID. Every placed cabinet is one entity.
+//! - A **component** is data attached to an entity. A cabinet entity has a
+//!   `Furniture` (its size, kind, colors) and a `Transform` (where it is).
+//! - A **resource** is a single global value: `Room`, `Selection`, `Editor`.
+//! - A **system** is a plain function that Bevy calls every frame. Its
+//!   parameters say what it reads: `Res<Room>` reads the room,
+//!   `ResMut<Room>` may change it, `Query<&Furniture>` loops over every piece.
+//!
+//! The data flows one way: input systems in `layout::edit` change
+//! components and resources, and set a `dirty` flag when a shape changed.
+//! `layout::view::sync_meshes` then rebuilds the meshes for whatever is
+//! dirty. Nothing in `layout::model` knows about input or drawing.
+//!
+//! # One frame, in order
+//!
+//! 1. `Update`: open any window that was requested, handle input in the
+//!    component planner and rebuild its preview, apply a finished file
+//!    dialog, then handle the room's mouse and keyboard and move its camera.
+//!    Windows the user closed are cleaned up last.
+//! 2. `EguiPrimaryContextPass`: draw the width labels, then the toolbar,
+//!    sidebar, and Properties panel of the main window.
+//! 3. `CutPlannerPass` / `ComponentPlannerPass`: draw the egui of the other
+//!    two windows, if they are open.
+//! 4. `PostUpdate`: rebuild changed meshes, record an undo step, and draw
+//!    the grid and selection outline.
 
 mod builder;
 mod cutting;
@@ -36,6 +82,8 @@ use crate::layout::history::{track_history, History};
 use crate::layout::model::{Editor, Room, Selection};
 use crate::layout::view::{draw_guides, setup_world, sync_meshes};
 
+/// Build the Bevy app: register every resource, add the plugins, and
+/// schedule every system. See the top of this file for the frame order.
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.73, 0.70, 0.64)))

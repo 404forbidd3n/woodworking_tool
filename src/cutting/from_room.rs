@@ -74,6 +74,8 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
     }
 }
 
+/// An L-shaped corner cabinet: two-piece top and bottom, three sides, two
+/// backs, and the fronts for its style.
 fn corner_parts(
     name: &str,
     width: f32,
@@ -132,6 +134,8 @@ fn corner_parts(
     parts
 }
 
+/// One rectangle per board of a custom block, scaled to the placed size.
+/// The two largest dimensions are the face that gets cut.
 fn custom_parts(name: &str, furniture: &Furniture) -> Vec<CutPart> {
     let Some(block) = furniture.custom.as_ref() else {
         return Vec::new();
@@ -160,6 +164,7 @@ fn custom_parts(name: &str, furniture: &Furniture) -> Vec<CutPart> {
     parts
 }
 
+/// A standard box cabinet: carcass plus fronts.
 fn cabinet(
     name: &str,
     width: f32,
@@ -174,6 +179,7 @@ fn cabinet(
     parts
 }
 
+/// Two sides, a top, a bottom, and a back, all from `panel`-thick stock.
 fn carcass(name: &str, width: f32, height: f32, depth: f32, panel: f32) -> Vec<CutPart> {
     let inner_width = (width - panel * 2.0).max(1.0);
     let inner_height = (height - panel * 2.0).max(1.0);
@@ -185,6 +191,7 @@ fn carcass(name: &str, width: f32, height: f32, depth: f32, panel: f32) -> Vec<C
     ]
 }
 
+/// Doors or drawer fronts, sized the same way the 3D view draws them.
 fn fronts(kind: Kind, name: &str, width: f32, height: f32, count: u8) -> Vec<CutPart> {
     match kind {
         Kind::Drawers { .. } => bands(height, count.max(1))
@@ -237,6 +244,22 @@ fn bands(length: f32, count: u8) -> Vec<(usize, f32)> {
         .collect()
 }
 
+/// A part named after its piece, e.g. "Sink base side".
+fn named(owner: &str, role: PartRole, width: f32, height: f32, quantity: u32) -> CutPart {
+    let name = if role == PartRole::Custom && owner.ends_with("leg") {
+        owner.to_owned()
+    } else {
+        format!("{owner} {}", role.label().to_lowercase())
+    };
+    CutPart {
+        name,
+        role,
+        width_mm: width,
+        height_mm: height,
+        quantity,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,20 +304,5 @@ mod tests {
             .unwrap();
         assert_eq!(shelf.quantity, 4);
         assert_eq!(shelf.width_mm, 564.0);
-    }
-}
-
-fn named(owner: &str, role: PartRole, width: f32, height: f32, quantity: u32) -> CutPart {
-    let name = if role == PartRole::Custom && owner.ends_with("leg") {
-        owner.to_owned()
-    } else {
-        format!("{owner} {}", role.label().to_lowercase())
-    };
-    CutPart {
-        name,
-        role,
-        width_mm: width,
-        height_mm: height,
-        quantity,
     }
 }

@@ -36,6 +36,7 @@ impl PartRole {
         PartRole::Custom,
     ];
 
+    /// Name shown in the UI. Also the string written to the save file.
     pub fn label(self) -> &'static str {
         match self {
             PartRole::Door => "Door",
@@ -50,6 +51,7 @@ impl PartRole {
         }
     }
 
+    /// Inverse of [`Self::label`]. Unknown text becomes `Custom`.
     pub fn from_label(label: &str) -> Self {
         Self::ALL
             .into_iter()
@@ -70,6 +72,7 @@ impl PartRole {
         matches!(self, PartRole::Door | PartRole::DrawerFront)
     }
 
+    /// Which tab of the cut list this part belongs to.
     pub fn group(self) -> CutListGroup {
         if self.is_front() {
             CutListGroup::Doors
@@ -102,6 +105,7 @@ pub struct CutPart {
 }
 
 impl CutPart {
+    /// The part's name, or its role when it has no name.
     pub fn titled(&self) -> String {
         if self.name.trim().is_empty() {
             self.role.label().to_owned()
@@ -177,6 +181,7 @@ impl Default for CutJob {
 }
 
 impl CutJob {
+    /// Rebuild the planner state from a saved project.
     pub fn from_file(file: &CutListFile) -> Self {
         let mut job = Self {
             board: StockBoard {
@@ -208,6 +213,7 @@ impl CutJob {
         job
     }
 
+    /// The saved form of this job, written into the project file.
     pub fn to_file(&self) -> CutListFile {
         CutListFile {
             board_width_mm: self.board.width_mm,
@@ -242,6 +248,8 @@ impl CutJob {
         }
     }
 
+    /// Move the half-typed part at the bottom of the list into the list, and
+    /// switch to the tab it landed in.
     pub fn add_draft(&mut self) {
         let quantity = self.draft_quantity.clamp(1, 100);
         let role = self.draft_role;

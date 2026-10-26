@@ -13,6 +13,7 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 use bevy_egui::EguiSchedule;
+use serde::{Deserialize, Serialize};
 
 use crate::layout::model::{project_dir, CustomBoard, CustomType};
 
@@ -30,15 +31,23 @@ pub const BUILDER_OFFSET: Vec3 = Vec3::new(40.0, 0.0, 0.0);
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ComponentPlannerPass;
 
+/// Marks the component planner's OS window.
 #[derive(Component)]
 pub struct ComponentPlannerWindow;
 
+/// Marks the 3D camera that renders into the component planner window.
+/// egui for that window is attached to this camera too.
 #[derive(Component)]
 pub struct ComponentPlannerCamera;
 
+/// Parent entity of the preview meshes. Its children are rebuilt by
+/// `scene::sync_preview` whenever the plan changes.
 #[derive(Component)]
 pub struct BuilderPreview;
 
+/// Entities that make up the open component planner window. All `None`
+/// while the window is closed. `requested` is set by the toolbar button and
+/// consumed by [`open_requested`] on the next frame.
 #[derive(Resource)]
 pub struct ComponentWindow {
     window: Option<Entity>,
@@ -60,10 +69,16 @@ impl Default for ComponentWindow {
     }
 }
 
+/// Ask for the component planner window. It opens on the next `Update`.
 pub fn request_open(state: &mut ComponentWindow) {
     state.requested = true;
 }
 
+/// System: open the component planner window when it was requested.
+///
+/// Spawns four entities: the OS window, a 3D camera aimed at it, the preview
+/// root for the board meshes, and a pair of lights. All of them live on
+/// [`BUILDER_LAYER`] so the room camera never draws them.
 pub fn open_requested(
     mut commands: Commands,
     mut state: ResMut<ComponentWindow>,
@@ -149,6 +164,8 @@ pub fn open_requested(
     plan.mesh_dirty = true;
 }
 
+/// System: the user closed the planner window. Despawn its camera,
+/// preview, and lights so nothing keeps rendering into a dead window.
 pub fn on_window_closed(
     mut removed: RemovedComponents<ComponentPlannerWindow>,
     mut state: ResMut<ComponentWindow>,
@@ -170,6 +187,7 @@ pub fn on_window_closed(
     }
 }
 
+/// What the current mouse drag in the planner is doing.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) enum DragKind {
     #[default]
@@ -179,6 +197,10 @@ pub(crate) enum DragKind {
     Move,
 }
 
+/// State of a mouse drag in the planner, from press to release.
+///
+/// `start_mm` and `hit` are captured on press so the board moves by the
+/// distance the cursor travelled, not to wherever the cursor is.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BuilderDrag {
     pub kind: DragKind,
@@ -208,6 +230,7 @@ impl Default for BuilderDrag {
     }
 }
 
+/// The planner's orbit camera. Same idea as the room's `OrbitCamera`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BuilderOrbit {
     pub focus: Vec3,
@@ -228,6 +251,7 @@ impl Default for BuilderOrbit {
 }
 
 impl BuilderOrbit {
+    /// The camera transform for these angles.
     pub fn pose(self) -> Transform {
         let pitch = self.pitch.clamp(0.08, 1.45);
         let horizontal = self.distance * pitch.cos();
@@ -281,6 +305,8 @@ impl Default for ComponentPlan {
 }
 
 impl ComponentPlan {
+    /// Delete one board and keep the selection pointing at the same board
+    /// (or at nothing, if the selected board was the one removed).
     pub fn remove_board(&mut self, index: usize) {
         if index >= self.boards.len() {
             return;
@@ -294,6 +320,7 @@ impl ComponentPlan {
         self.mesh_dirty = true;
     }
 
+    /// Start editing a saved type. Saving again with the same name replaces it.
     pub fn load_type(&mut self, block: &CustomType) {
         self.name = block.name.clone();
         self.boards = block.boards.clone();
@@ -310,6 +337,8 @@ pub struct CustomLibrary {
     pub types: Vec<CustomType>,
 }
 
+/// How much of the planner window the egui panels cover, in pixels.
+/// Clicks inside this area belong to egui, not to the 3D view.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct BuilderChrome {
     pub sidebar: f32,
@@ -326,6 +355,7 @@ impl Default for BuilderChrome {
 }
 
 impl CustomLibrary {
+    /// Read `customs.json`. A missing or broken file gives an empty library.
     pub fn load() -> Self {
         let path = customs_path();
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -341,6 +371,9 @@ impl CustomLibrary {
         library
     }
 
+    /// Save the plan being edited into the library and write `customs.json`.
+    /// A type with the same name is replaced. The result is shown in
+    /// `plan.status`.
     pub fn save_plan(&mut self, plan: &mut ComponentPlan) {
         let name = plan.name.trim();
         if name.is_empty() {
@@ -372,6 +405,7 @@ impl CustomLibrary {
         }
     }
 
+    /// Write the whole library to `customs.json`.
     fn write(&self) -> std::io::Result<()> {
         let file = CustomLibraryFile {
             types: self.types.clone(),
@@ -381,17 +415,18 @@ impl CustomLibrary {
     }
 }
 
+/// On-disk shape of `customs.json`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CustomLibraryFile {
     types: Vec<CustomType>,
 }
 
-use serde::{Deserialize, Serialize};
-
+/// `customs.json` in the project folder.
 fn customs_path() -> std::path::PathBuf {
     project_dir().join("customs.json")
 }
 
+/// Startup system: load the saved custom types.
 pub fn load_saved(mut library: ResMut<CustomLibrary>) {
     *library = CustomLibrary::load();
 }

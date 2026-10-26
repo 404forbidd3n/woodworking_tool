@@ -22,6 +22,7 @@ pub struct PlacedPart {
     pub rotated: bool,
 }
 
+/// Everything placed on one sheet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackedSheet {
     pub parts: Vec<PlacedPart>,
@@ -40,10 +41,12 @@ pub struct Estimate {
 }
 
 impl Estimate {
+    /// How many sheets to buy.
     pub fn boards_to_order(&self) -> usize {
         self.sheets.len()
     }
 
+    /// Share of the bought sheets that ends up as offcut, 0.0 to 1.0.
     pub fn waste_ratio(&self) -> f32 {
         if self.sheet_area_mm2 <= f32::EPSILON {
             0.0
@@ -53,12 +56,15 @@ impl Estimate {
     }
 }
 
+/// One horizontal band on a sheet while packing. `cursor_mm` is where the
+/// next part in this band would start.
 struct OpenShelf {
     y_mm: f32,
     height_mm: f32,
     cursor_mm: f32,
 }
 
+/// A sheet while packing: its bands and the parts placed so far.
 struct OpenSheet {
     shelves: Vec<OpenShelf>,
     parts: Vec<PlacedPart>,
@@ -147,6 +153,8 @@ pub fn estimate(board: &StockBoard, parts: &[CutPart]) -> Estimate {
     }
 }
 
+/// The ways a part may lie on the sheet: as drawn, and turned 90° when
+/// rotation is allowed. Returned as (width, height, rotated).
 fn orientations(width: f32, height: f32, allow_rotate: bool) -> Vec<(f32, f32, bool)> {
     if allow_rotate && (width - height).abs() > 0.1 {
         // Prefer the orientation that is shorter in height. A shorter band
@@ -163,6 +171,8 @@ fn orientations(width: f32, height: f32, allow_rotate: bool) -> Vec<(f32, f32, b
     }
 }
 
+/// Try to place one part on a sheet: first in an existing band, then in a
+/// new band underneath. Returns `false` if the sheet is full.
 fn place_on_sheet(
     sheet: &mut OpenSheet,
     part_index: usize,

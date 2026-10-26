@@ -17,6 +17,7 @@ use super::job::{CutJob, CutListGroup, CutPart, PartRole};
 use super::pack;
 use super::CutPlannerCamera;
 
+/// Colors cycled through for the parts on the canvas and in the list.
 const PART_COLORS: [[u8; 3]; 8] = [
     [196, 122, 58],
     [62, 122, 168],
@@ -28,6 +29,7 @@ const PART_COLORS: [[u8; 3]; 8] = [
     [120, 86, 62],
 ];
 
+/// egui system for the cut planner window: toolbar, sidebar, and canvas.
 pub fn draw(
     mut contexts: Query<&mut EguiContext, With<CutPlannerCamera>>,
     mut job: ResMut<CutJob>,
@@ -65,6 +67,7 @@ pub fn draw(
         .show(&mut viewport_ui, |ui| draw_canvas(ui, &mut job));
 }
 
+/// Title, the Estimate button, and the result ("Order 2 boards · 18% offcut").
 fn draw_toolbar(ui: &mut egui::Ui, job: &mut CutJob) {
     let cream = theme::ink();
     ui.horizontal(|ui| {
@@ -97,6 +100,7 @@ fn draw_toolbar(ui: &mut egui::Ui, job: &mut CutJob) {
     });
 }
 
+/// The supplied sheet settings and the parts list.
 fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furniture>) {
     egui::ScrollArea::vertical()
         .id_salt("cut_sidebar")
@@ -170,6 +174,7 @@ fn draw_sidebar(ui: &mut egui::Ui, job: &mut CutJob, furniture: &Query<&Furnitur
         });
 }
 
+/// The row for typing in a new part.
 fn draw_draft(ui: &mut egui::Ui, job: &mut CutJob) {
     ui.horizontal(|ui| {
         ui.label("Kind");
@@ -195,6 +200,8 @@ fn draw_draft(ui: &mut egui::Ui, job: &mut CutJob) {
     }
 }
 
+/// Doors / Backs / Parts tabs. Switching tab also switches the draft's kind
+/// to something that belongs in that tab.
 fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
     let doors = job
         .parts
@@ -253,6 +260,7 @@ fn draw_list_tabs(ui: &mut egui::Ui, job: &mut CutJob) {
     ui.weak(note);
 }
 
+/// One row in the parts list. Returns `true` when Remove was clicked.
 fn part_row(ui: &mut egui::Ui, index: usize, part: &CutPart) -> bool {
     let color = part_color(index);
     let mut remove = false;
@@ -287,6 +295,8 @@ fn part_row(ui: &mut egui::Ui, index: usize, part: &CutPart) -> bool {
     remove
 }
 
+/// The right side: messages, parts that do not fit, page buttons, and the
+/// current sheet.
 fn draw_canvas(ui: &mut egui::Ui, job: &mut CutJob) {
     let available = ui.available_size();
     if job.estimate.is_none() {
@@ -364,6 +374,7 @@ fn draw_canvas(ui: &mut egui::Ui, job: &mut CutJob) {
     draw_sheet(ui, job, page, height);
 }
 
+/// Big centered text in an otherwise empty canvas.
 fn paint_canvas_message(ui: &mut egui::Ui, available: egui::Vec2, message: &str) {
     let size = if available.x.is_finite() && available.y.is_finite() {
         available
@@ -380,6 +391,8 @@ fn paint_canvas_message(ui: &mut egui::Ui, available: egui::Vec2, message: &str)
     );
 }
 
+/// Draw one packed sheet, scaled to fit, with every part in color and its
+/// size written on it. The sheet's Y axis points up, as on a drawing.
 fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, page: usize, height: f32) {
     let Some(placed) = job
         .estimate
@@ -468,11 +481,13 @@ fn draw_sheet(ui: &mut egui::Ui, job: &CutJob, page: usize, height: f32) {
     }
 }
 
+/// Color for the part at `index`.
 fn part_color(index: usize) -> egui::Color32 {
     let rgb = PART_COLORS[index % PART_COLORS.len()];
     egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
+/// Black or white, whichever reads better on `color`.
 fn text_on(color: egui::Color32) -> egui::Color32 {
     let brightness = color.r() as u16 + color.g() as u16 + color.b() as u16;
     if brightness > 420 {
@@ -482,6 +497,7 @@ fn text_on(color: egui::Color32) -> egui::Color32 {
     }
 }
 
+/// Labeled millimeter field. Returns `true` when edited.
 fn mm_row(
     ui: &mut egui::Ui,
     label: &str,

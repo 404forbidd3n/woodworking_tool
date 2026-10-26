@@ -8,6 +8,8 @@ use crate::theme;
 
 use super::{BuilderChrome, ComponentPlan, ComponentPlannerCamera, CustomLibrary};
 
+/// egui system for the planner window: the toolbar and the sidebar. It also
+/// records how much space they take in [`BuilderChrome`].
 pub fn draw(
     mut contexts: Query<&mut EguiContext, With<ComponentPlannerCamera>>,
     mut plan: ResMut<ComponentPlan>,
@@ -44,6 +46,7 @@ pub fn draw(
     chrome.sidebar = side.response.rect.right();
 }
 
+/// Title, Save type, New block, and the status message.
 fn draw_toolbar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &mut CustomLibrary) {
     ui.horizontal(|ui| {
         ui.label(
@@ -68,6 +71,8 @@ fn draw_toolbar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &mut Custo
     });
 }
 
+/// Everything on the left: help text, name, "Add a board" buttons, the list
+/// of boards, saved types, and the editor for the selected board.
 fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLibrary) {
     egui::ScrollArea::vertical()
         .id_salt("component_sidebar")
@@ -302,12 +307,14 @@ fn draw_sidebar(ui: &mut egui::Ui, plan: &mut ComponentPlan, library: &CustomLib
         });
 }
 
+/// Add a board and select it.
 fn push_board(plan: &mut ComponentPlan, board: CustomBoard) {
     plan.boards.push(board);
     plan.selected = Some(plan.boards.len() - 1);
     plan.mesh_dirty = true;
 }
 
+/// A gable that sits on top of the default 720 mm cabinet.
 fn triangle_wall(shape: BoardShape) -> CustomBoard {
     let mut board = CustomRole::Wall.default_board();
     board.shape = shape;
@@ -320,6 +327,7 @@ fn triangle_wall(shape: BoardShape) -> CustomBoard {
     board
 }
 
+/// Labeled angle field, -180° to 180°. Returns `true` when edited.
 fn deg_field(ui: &mut egui::Ui, label: &str, value: &mut f32) -> bool {
     ui.horizontal(|ui| {
         ui.add_sized([52.0, 18.0], egui::Label::new(label));
@@ -334,6 +342,7 @@ fn deg_field(ui: &mut egui::Ui, label: &str, value: &mut f32) -> bool {
     .inner
 }
 
+/// Labeled millimeter field. Returns `true` when edited.
 fn mm_field(ui: &mut egui::Ui, label: &str, value: &mut f32) -> bool {
     ui.horizontal(|ui| {
         ui.add_sized([52.0, 18.0], egui::Label::new(label));
