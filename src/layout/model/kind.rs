@@ -23,6 +23,15 @@ pub enum Kind {
     Drawers {
         count: u8,
     },
+    /// A base cabinet with a full-height pull-out "jolly" on the left and a
+    /// stack of `drawers` equal drawers on the right. A vertical divider
+    /// separates the two bays. `jolly_mm` is the jolly bay's outer width.
+    JollyDrawers {
+        #[serde(default = "default_jolly_drawers")]
+        drawers: u8,
+        #[serde(default = "default_jolly_mm")]
+        jolly_mm: u16,
+    },
     /// A hinged door, or a pair of them.
     HingedDoors {
         doors: u8,
@@ -48,6 +57,9 @@ pub enum Kind {
     ElectricOven,
     CoffeeMachine,
     Microwave,
+    /// A flat black glass induction plate with four cooking zones. Starts on
+    /// top of the default 758 mm worktop.
+    InductionHob,
     SquareSink,
     RoundSink,
     DoubleSink,
@@ -134,6 +146,7 @@ impl Kind {
         match self {
             Kind::Drawers { .. } if placement == Placement::Wall => "Wall Drawer Cabinet",
             Kind::Drawers { .. } => "Drawer Base Cabinet",
+            Kind::JollyDrawers { .. } => "Jolly + Drawer Base Cabinet",
             Kind::HingedDoors { doors: 1 } if placement == Placement::Wall => {
                 "Single-Door Wall Cabinet"
             }
@@ -151,6 +164,7 @@ impl Kind {
             Kind::ElectricOven => "Electric Oven",
             Kind::CoffeeMachine => "Coffee Machine",
             Kind::Microwave => "Microwave",
+            Kind::InductionHob => "Induction Hob",
             Kind::SquareSink => "Square Kitchen Sink",
             Kind::RoundSink => "Round Kitchen Sink",
             Kind::DoubleSink => "Double-Bowl Kitchen Sink",
@@ -187,10 +201,22 @@ impl Kind {
         matches!(self, Kind::Pipe { .. })
     }
 
+    /// Smallest height the piece may be given, in mm. Slabs are measured by
+    /// their thickness, so they go well below the 50 mm floor of a cabinet.
+    pub fn min_height_mm(self) -> f32 {
+        match self {
+            Kind::Countertop | Kind::Tabletop | Kind::InductionHob => 4.0,
+            Kind::Pipe { .. } => 8.0,
+            _ => 50.0,
+        }
+    }
+
     /// How many doors or drawer fronts this kind has. Zero for open pieces.
     pub fn front_count(self) -> usize {
         match self {
             Kind::Drawers { count } => count.max(1) as usize,
+            // Front 0 is the jolly; fronts 1..=drawers are the drawers.
+            Kind::JollyDrawers { drawers, .. } => drawers.max(1) as usize + 1,
             Kind::HingedDoors { doors } => doors.clamp(1, 2) as usize,
             Kind::LiftDoor => 1,
             Kind::SlidingDoors => 2,
@@ -213,6 +239,7 @@ impl Kind {
                 | Kind::ElectricOven
                 | Kind::CoffeeMachine
                 | Kind::Microwave
+                | Kind::InductionHob
                 | Kind::SquareSink
                 | Kind::RoundSink
                 | Kind::DoubleSink
@@ -227,6 +254,7 @@ impl Kind {
         matches!(
             self,
             Kind::Drawers { .. }
+                | Kind::JollyDrawers { .. }
                 | Kind::HingedDoors { .. }
                 | Kind::LiftDoor
                 | Kind::SlidingDoors
@@ -248,6 +276,8 @@ impl Kind {
                 }
             }
             Kind::Custom => (600.0, 720.0, 560.0, 0.0),
+            // A tall base: the jolly wants the extra height for bottles.
+            Kind::JollyDrawers { .. } => (600.0, 780.0, 560.0, 0.0),
             Kind::Corner { .. } => {
                 // 600 mm along each wall. The arms are 350 mm deep, so a 560 mm
                 // base depth would leave almost no opening on a 600 mm plan.
@@ -268,6 +298,8 @@ impl Kind {
             Kind::ElectricOven => (600.0, 600.0, 570.0, 720.0),
             Kind::CoffeeMachine => (260.0, 350.0, 420.0, 900.0),
             Kind::Microwave => (520.0, 310.0, 400.0, 1200.0),
+            // 6 mm of glass resting on the 758 mm top of the default worktop.
+            Kind::InductionHob => (590.0, 6.0, 520.0, 758.0),
             // Sink tops align with the 758 mm top of the default worktop.
             Kind::SquareSink => (500.0, 180.0, 450.0, 578.0),
             Kind::RoundSink => (450.0, 180.0, 450.0, 578.0),
@@ -305,6 +337,30 @@ impl Kind {
 /// Serde default for `OpenShelves::shelves` in older files.
 const fn default_shelf_count() -> u8 {
     3
+}
+
+/// Serde default for `JollyDrawers::drawers`.
+const fn default_jolly_drawers() -> u8 {
+    2
+}
+
+/// Serde default for `JollyDrawers::jolly_mm`.
+const fn default_jolly_mm() -> u16 {
+    JOLLY_DEFAULT_MM
+}
+
+/// Starting outer width of the jolly bay on a new jolly + drawer cabinet.
+pub const JOLLY_DEFAULT_MM: u16 = 200;
+/// Narrowest jolly bay, and the narrowest drawer bay left beside it.
+pub const JOLLY_MIN_MM: f32 = 100.0;
+
+/// The jolly bay's outer width in mm, measured from the cabinet's left face
+/// to the middle of the divider. Kept inside the cabinet so both bays stay at
+/// least [`JOLLY_MIN_MM`] wide, or half the cabinet each when it is too narrow.
+pub fn jolly_width_mm(cabinet_width_mm: f32, jolly_mm: u16) -> f32 {
+    let low = JOLLY_MIN_MM.min(cabinet_width_mm * 0.5);
+    let high = (cabinet_width_mm - JOLLY_MIN_MM).max(low);
+    (jolly_mm as f32).clamp(low, high)
 }
 
 /// Serde default for `Pipe::count` in older files.

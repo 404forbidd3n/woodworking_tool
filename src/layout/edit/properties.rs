@@ -13,8 +13,9 @@ use super::spawn::place_at_center;
 use super::widgets::mm_row;
 use super::PropertiesUi;
 use crate::layout::model::{
-    m_to_mm, mm_to_m, quarter_turns, rotation_from_turns, CornerStyle, DoorStyle, Furniture, Kind,
-    LegStyle, PipeColor, Placement, Room, Selection, PIPE_PAIR_GAP_MM,
+    jolly_width_mm, m_to_mm, mm_to_m, quarter_turns, rotation_from_turns, CornerStyle, DoorStyle,
+    Furniture, Kind, LegStyle, PipeColor, Placement, Room, Selection, JOLLY_MIN_MM,
+    PIPE_PAIR_GAP_MM,
 };
 use crate::theme;
 
@@ -147,7 +148,8 @@ fn draw_properties(
             furniture.width_mm = width;
             furniture.dirty = true;
         }
-        if mm_row(ui, "Height", &mut height, 50.0..=4000.0) {
+        let min_height = furniture.kind.min_height_mm();
+        if mm_row(ui, "Height", &mut height, min_height..=4000.0) {
             furniture.height_mm = height;
             furniture.dirty = true;
         }
@@ -329,6 +331,38 @@ fn kind_options(ui: &mut egui::Ui, furniture: &mut Furniture) {
             }
             ui.label("Drawers split the height into equal fronts.");
         }
+        Kind::JollyDrawers { drawers, jolly_mm } => {
+            let mut count = drawers as i32;
+            if ui
+                .add(egui::Slider::new(&mut count, 1..=10).text("Drawers"))
+                .changed()
+            {
+                furniture.kind = Kind::JollyDrawers {
+                    drawers: count as u8,
+                    jolly_mm,
+                };
+                furniture.ensure_front_finishes();
+                furniture.dirty = true;
+            }
+            let max = (furniture.width_mm - JOLLY_MIN_MM).max(JOLLY_MIN_MM);
+            let mut jolly = jolly_width_mm(furniture.width_mm, jolly_mm);
+            if ui
+                .add(
+                    egui::Slider::new(&mut jolly, JOLLY_MIN_MM..=max)
+                        .step_by(1.0)
+                        .suffix(" mm")
+                        .text("Jolly width"),
+                )
+                .changed()
+            {
+                furniture.kind = Kind::JollyDrawers {
+                    drawers,
+                    jolly_mm: jolly.round() as u16,
+                };
+                furniture.dirty = true;
+            }
+            ui.label("A full-height pull-out on the left, drawers stacked on the right.");
+        }
         Kind::HingedDoors { doors } => {
             ui.horizontal(|ui| {
                 if ui.selectable_label(doors == 1, "1 door").clicked() && doors != 1 {
@@ -379,6 +413,9 @@ fn kind_options(ui: &mut egui::Ui, furniture: &mut Furniture) {
         | Kind::CentralHeatingBoiler
         | Kind::AirConditioner => {
             ui.label("Stylized appliance model with editable overall dimensions.");
+        }
+        Kind::InductionHob => {
+            ui.label("Black glass plate with four cooking zones. Height is the glass thickness.");
         }
         Kind::SquareSink => {
             ui.label("Open rectangular basin for washing dishes. The rim sits at worktop height.");
@@ -519,10 +556,16 @@ fn materials_section(ui: &mut egui::Ui, furniture: &mut Furniture, materials_det
                 } else {
                     "Door"
                 };
+                let jolly = matches!(furniture.kind, Kind::JollyDrawers { .. });
                 for index in 0..furniture.finishes.fronts.len() {
+                    let label = match (jolly, index) {
+                        (true, 0) => "Jolly".to_owned(),
+                        (true, _) => format!("Drawer {index}"),
+                        _ => format!("{front_word} {}", index + 1),
+                    };
                     if finish_row(
                         ui,
-                        &format!("{front_word} {}", index + 1),
+                        &label,
                         &mut furniture.finishes.fronts[index],
                     ) {
                         furniture.dirty = true;

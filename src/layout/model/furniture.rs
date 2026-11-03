@@ -79,9 +79,10 @@ impl Furniture {
     pub fn size_meters(&self) -> Vec3 {
         // Pipes are much thinner than a cabinet panel, so they keep a smaller floor.
         let minimum = if self.kind.is_pipe() { 0.008 } else { 0.05 };
+        let min_height = mm_to_m(self.kind.min_height_mm()).min(minimum);
         Vec3::new(
             mm_to_m(self.width_mm).max(minimum),
-            mm_to_m(self.height_mm).max(minimum),
+            mm_to_m(self.height_mm).max(min_height),
             mm_to_m(self.depth_mm).max(minimum),
         )
     }

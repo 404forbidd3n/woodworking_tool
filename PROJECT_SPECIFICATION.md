@@ -84,6 +84,16 @@ view ignores the pointer there, so it does not select or move pieces.
 ### 4.1 Floor furniture
 
 - Drawer Base Cabinet — editable drawer count, equally divided fronts.
+- Jolly + Drawer Base Cabinet — 600 × 780 × 560 mm by default. A vertical
+  divider splits the box into two bays. The left bay is closed by a jolly: a
+  narrow pull-out front that runs the full height of the cabinet, 200 mm wide
+  by default. Its pull is a long vertical bar near the top (40% of the
+  cabinet height, 80 to 320 mm), so it reads differently from the drawers'
+  horizontal pulls. The right bay holds a stack of equal
+  drawers, two by default, editable from 1 to 10. The jolly width can be set
+  between 100 mm and the cabinet width minus 100 mm, so neither bay gets
+  narrower than 100 mm. The fronts leave a 3 mm gap at the outer edges and a
+  single 3 mm seam between the jolly and the drawers.
 - Door Base Cabinet — one or two hinged doors.
 - Sliding-Door Cabinet — two overlapping leaves.
 - Open Shelf Cabinet — editable count of evenly spaced internal shelves.
@@ -125,6 +135,10 @@ placed 1400 mm above the floor.
 - Electric oven
 - Coffee machine
 - Microwave
+- Induction hob — a 590 × 6 × 520 mm black glass plate with four cooking
+  zones, two larger and two smaller, and a touch-control strip along the
+  front. It starts at 758 mm, on top of the default worktop, and is moved and
+  sized like any other appliance. Its height is the glass thickness.
 - Square kitchen sink
 - Round kitchen sink
 - Large double-bowl square kitchen sink
@@ -171,6 +185,13 @@ Any cabinet that has doors (hinged, lift-up, sliding, and both corner types)
 can use a solid front or a glass front. Glass is a frame of the front finish
 with a clear pane in the middle. The default is solid, so older project files
 still open with solid doors. Drawer fronts stay solid.
+
+Every door and drawer front has a thin black margin, 2 mm wide, so
+neighbouring fronts read as separate pieces. This applies to every cabinet,
+corner cabinets, glass door frames, and the door and drawer boards of custom
+blocks, both in the room and in the Component planner. The margin is a band
+drawn just behind the front, so it never covers the front's colour, and it is
+not part of the cut list.
 
 Cabinet colours open on Body & fronts. Body paints every carcass board at
 once. Fronts paints every door and every drawer front at once. Handles stay
@@ -231,6 +252,7 @@ Properties exposes:
 - piece name;
 - width, carcass height, and depth;
 - drawer, door, or shelf count where relevant;
+- jolly width on the jolly + drawer cabinet;
 - door face, solid or glass, on cabinets that have doors;
 - floor/wall placement;
 - adjustable leg style for floor cabinets;
@@ -366,6 +388,14 @@ Migration rules:
 A custom piece stores its boards in the project file, so the room still opens
 if `customs.json` is missing. The Customs list itself comes from `customs.json`.
 
+The app opens `silvius.json` from the project directory at startup, and Save
+writes there when no name has been entered. If that file is missing, the
+example kitchen is shown instead.
+
+Slabs are measured by their thickness, so a worktop, tabletop, or induction
+hob can be as thin as 4 mm. Other pieces keep a 50 mm minimum height. Loading
+a file applies the same minimum.
+
 Relative paths resolve inside the project directory. Native dialogs may select
 files elsewhere. Load and Save As open those dialogs without stopping the
 window. Save As appends `.json` when no extension is supplied.
@@ -413,7 +443,10 @@ Each row shows the tag, the quantity and name, and the size in millimetres. A ro
 Parts can be entered manually or imported from furniture in the room.
 Appliances, pipes, and adjustable cabinet legs are excluded from sheet stock.
 A corner cabinet contributes an approximate list: sides, top, bottom, back,
-two doors, and, for the shelf style, two shelves. A glass door is still listed
+two doors, and, for the shelf style, two shelves. A jolly + drawer cabinet
+contributes its carcass, one divider (depth minus the back, by the inner
+height), the full-height jolly front, and one front per drawer. The jolly and
+the drawers all go to the Doors tab as drawer fronts. A glass door is still listed
 as a door; the pane is bought, not cut from the sheet. A custom block
 contributes one rectangle for each piece of each board, after the piece is
 scaled. A door or drawer front goes to the Doors tab and a back goes to the

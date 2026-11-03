@@ -5,8 +5,8 @@
 //! small gap already used on the fronts, and no hardware.
 
 use crate::layout::model::{
-    equal_spans, m_to_mm, mm_to_m, CornerStyle, CustomRole, Furniture, Kind, GAP_METERS,
-    PANEL_METERS,
+    equal_spans, jolly_width_mm, m_to_mm, mm_to_m, CornerStyle, CustomRole, Furniture, Kind,
+    GAP_METERS, PANEL_METERS,
 };
 
 use super::job::{CutPart, PartRole};
@@ -51,6 +51,9 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
         Kind::Drawers { count } => {
             cabinet(name, width, height, depth, panel, furniture.kind, count)
         }
+        Kind::JollyDrawers { drawers, jolly_mm } => {
+            jolly_parts(name, width, height, depth, panel, jolly_mm, drawers)
+        }
         Kind::HingedDoors { doors } => {
             cabinet(name, width, height, depth, panel, furniture.kind, doors)
         }
@@ -64,6 +67,7 @@ pub fn parts_from_furniture(furniture: &Furniture) -> Vec<CutPart> {
         | Kind::ElectricOven
         | Kind::CoffeeMachine
         | Kind::Microwave
+        | Kind::InductionHob
         | Kind::SquareSink
         | Kind::RoundSink
         | Kind::DoubleSink
@@ -131,6 +135,49 @@ fn corner_parts(
             ));
         }
     }
+    parts
+}
+
+/// The jolly + drawers cabinet: carcass, the divider between the two bays,
+/// one full-height jolly front, and the drawer fronts on the right.
+/// Fronts leave a 3 mm gap at each outer edge and one 3 mm seam between bays.
+fn jolly_parts(
+    name: &str,
+    width: f32,
+    height: f32,
+    depth: f32,
+    panel: f32,
+    jolly_mm: u16,
+    drawers: u8,
+) -> Vec<CutPart> {
+    let jolly = jolly_width_mm(width, jolly_mm);
+    let mut parts = carcass(name, width, height, depth, panel);
+    parts.push(named(
+        name,
+        PartRole::Divider,
+        (depth - panel).max(1.0),
+        (height - panel * 2.0).max(1.0),
+        1,
+    ));
+    parts.push(CutPart {
+        name: format!("{name} jolly"),
+        role: PartRole::DrawerFront,
+        width_mm: (jolly - 4.5).max(1.0),
+        height_mm: (height - 6.0).max(1.0),
+        quantity: 1,
+    });
+    let drawer_width = (width - jolly - 4.5).max(1.0);
+    parts.extend(
+        bands(height, drawers.clamp(1, 10))
+            .into_iter()
+            .map(|(index, band)| CutPart {
+                name: format!("{name} drawer {index}"),
+                role: PartRole::DrawerFront,
+                width_mm: drawer_width,
+                height_mm: band,
+                quantity: 1,
+            }),
+    );
     parts
 }
 
@@ -286,6 +333,35 @@ mod tests {
         assert!(parts
             .iter()
             .all(|part| part.width_mm > 0.0 && part.height_mm > 0.0));
+    }
+
+    #[test]
+    fn jolly_cabinet_lists_divider_jolly_and_drawers() {
+        let kind = Kind::JollyDrawers {
+            drawers: 2,
+            jolly_mm: 200,
+        };
+        let cabinet = Furniture::new(kind, 600.0, 780.0, 560.0);
+        let parts = parts_from_furniture(&cabinet);
+        let roles: Vec<_> = parts.iter().map(|part| part.role).collect();
+        assert_eq!(
+            roles,
+            vec![
+                PartRole::Side,
+                PartRole::Top,
+                PartRole::Bottom,
+                PartRole::Back,
+                PartRole::Divider,
+                PartRole::DrawerFront,
+                PartRole::DrawerFront,
+                PartRole::DrawerFront,
+            ]
+        );
+        let jolly = &parts[5];
+        assert_eq!(jolly.width_mm, 195.5);
+        assert_eq!(jolly.height_mm, 774.0);
+        assert_eq!(parts[6].width_mm, 395.5);
+        assert!(parts[6].height_mm < 400.0);
     }
 
     #[test]

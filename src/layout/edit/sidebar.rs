@@ -33,7 +33,7 @@ use crate::cutting::{CutJob, CutWindow};
 use crate::layout::history::History;
 use crate::layout::model::{
     example_layout, sanitize_openings, CornerStyle, Editor, Furniture, Kind, Opening, OpeningKind,
-    PipeColor, Placement, Room, Selection, WallSide,
+    PipeColor, Placement, Room, Selection, WallSide, JOLLY_DEFAULT_MM,
 };
 use crate::layout::project::NativeDialog;
 use crate::layout::view::OrbitCamera;
@@ -402,6 +402,13 @@ fn furniture_section(
         ui.strong("Floor");
         for (label, kind) in [
             ("Drawer Base Cabinet", Kind::Drawers { count: 3 }),
+            (
+                "Jolly + Drawer Base Cabinet",
+                Kind::JollyDrawers {
+                    drawers: 2,
+                    jolly_mm: JOLLY_DEFAULT_MM,
+                },
+            ),
             ("Door Base Cabinet", Kind::HingedDoors { doors: 2 }),
             ("Sliding-Door Cabinet", Kind::SlidingDoors),
             ("Open Shelf Cabinet", Kind::OpenShelves { shelves: 3 }),
@@ -508,6 +515,7 @@ fn appliances_section(
             ("Electric Oven", Kind::ElectricOven, Placement::Floor),
             ("Coffee Machine", Kind::CoffeeMachine, Placement::Floor),
             ("Microwave", Kind::Microwave, Placement::Floor),
+            ("Induction Hob", Kind::InductionHob, Placement::Floor),
             ("Square Kitchen Sink", Kind::SquareSink, Placement::Floor),
             ("Round Kitchen Sink", Kind::RoundSink, Placement::Floor),
             (

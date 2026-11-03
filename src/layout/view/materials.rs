@@ -80,6 +80,7 @@ impl Palette {
             Surface::Floor => self.floor.clone(),
             Surface::Wall => self.wall.clone(),
             Surface::Glass => self.glass.clone(),
+            Surface::Edge => self.handle.clone(),
         }
     }
 }
@@ -194,6 +195,7 @@ pub(super) fn surface_material(
             _ => return palette.handle(role),
         },
         Surface::Glass => return cache.glass(materials),
+        Surface::Edge => Finish::new(FinishPreset::Charcoal, [10, 10, 10]),
         Surface::Floor | Surface::Wall => return palette.handle(role),
     };
     cache.get(materials, images, finish)

@@ -41,13 +41,181 @@ fn drawers_split_the_front_into_equal_bands() {
 }
 
 #[test]
+fn jolly_cabinet_has_a_full_height_jolly_left_and_drawers_right() {
+    let (furniture, y_mm) = Kind::JollyDrawers {
+        drawers: 3,
+        jolly_mm: JOLLY_DEFAULT_MM,
+    }
+    .preset(Placement::Floor);
+    assert_eq!(
+        (furniture.width_mm, furniture.height_mm, y_mm),
+        (600.0, 780.0, 0.0)
+    );
+    assert_eq!(furniture.kind.front_count(), 4);
+    assert_eq!(furniture.legs, LegStyle::Plastic100);
+
+    let parts = solids(&furniture);
+    let front = |index: u8| {
+        parts
+            .iter()
+            .find(|solid| solid.role == Surface::Front(index))
+            .copied()
+            .unwrap()
+    };
+    let jolly = front(0);
+    let height = furniture.height_mm / MM_PER_METER;
+    assert!(jolly.size.y > height - 0.01, "jolly is not full height");
+    assert!(jolly.translation.x < 0.0, "jolly is not on the left");
+    assert!((jolly.size.x - 0.1955).abs() < 1.0e-4);
+
+    let drawers: Vec<_> = (1..=3).map(front).collect();
+    for drawer in &drawers {
+        assert!(drawer.translation.x > 0.0, "drawer is not on the right");
+        assert!(drawer.size.y < height / 3.0);
+        // Drawers stop one gap short of the jolly: no overlap in X.
+        let jolly_right = jolly.translation.x + jolly.size.x * 0.5;
+        let drawer_left = drawer.translation.x - drawer.size.x * 0.5;
+        assert!((drawer_left - jolly_right - GAP_METERS).abs() < 1.0e-4);
+    }
+    assert!(drawers[0].translation.y < drawers[1].translation.y);
+    assert!(drawers[1].translation.y < drawers[2].translation.y);
+}
+
+#[test]
+fn jolly_width_stays_inside_the_cabinet() {
+    assert_eq!(jolly_width_mm(600.0, 200), 200.0);
+    assert_eq!(jolly_width_mm(600.0, 20), JOLLY_MIN_MM);
+    assert_eq!(jolly_width_mm(600.0, 900), 500.0);
+    assert_eq!(jolly_width_mm(150.0, 200), 75.0);
+}
+
+#[test]
+fn jolly_pull_is_a_long_vertical_bar() {
+    let furniture = Kind::JollyDrawers {
+        drawers: 2,
+        jolly_mm: JOLLY_DEFAULT_MM,
+    }
+    .preset(Placement::Floor)
+    .0;
+    let parts = solids(&furniture);
+    let handles: Vec<_> = parts
+        .iter()
+        .filter(|solid| solid.role == Surface::Handle)
+        .collect();
+    assert_eq!(handles.len(), 3);
+    let jolly = handles
+        .iter()
+        .find(|solid| solid.translation.x < 0.0)
+        .unwrap();
+    assert!(
+        jolly.size.y > jolly.size.x * 10.0,
+        "jolly pull is not upright"
+    );
+    assert!(jolly.size.y >= 0.3);
+    for drawer in handles.iter().filter(|solid| solid.translation.x > 0.0) {
+        assert!(
+            drawer.size.x > drawer.size.y,
+            "drawer pull is not horizontal"
+        );
+    }
+}
+
+#[test]
+fn every_front_gets_a_black_edge_band_behind_it() {
+    for kind in [
+        Kind::Drawers { count: 3 },
+        Kind::JollyDrawers {
+            drawers: 2,
+            jolly_mm: 200,
+        },
+        Kind::HingedDoors { doors: 2 },
+        Kind::LiftDoor,
+        Kind::SlidingDoors,
+        Kind::Corner {
+            style: CornerStyle::DoubleDoor,
+        },
+    ] {
+        let furniture = Furniture::new(kind, 600.0, 720.0, 600.0);
+        let parts = solids(&furniture);
+        let fronts: Vec<_> = parts
+            .iter()
+            .filter(|solid| matches!(solid.role, Surface::Front(_)))
+            .collect();
+        let edges: Vec<_> = parts
+            .iter()
+            .filter(|solid| solid.role == Surface::Edge)
+            .collect();
+        assert_eq!(fronts.len(), edges.len(), "{kind:?}");
+        for (front, edge) in fronts.iter().zip(&edges) {
+            assert_eq!(front.translation, edge.translation, "{kind:?}");
+            assert_eq!(front.rotation, edge.rotation, "{kind:?}");
+        }
+    }
+    let band = edge_band_size(Vec3::new(0.4, 0.2, 0.018));
+    assert!((band.x - (0.4 + FRONT_EDGE_METERS * 2.0)).abs() < 1.0e-6);
+    assert!((band.y - (0.2 + FRONT_EDGE_METERS * 2.0)).abs() < 1.0e-6);
+    assert!((band.z - 0.017).abs() < 1.0e-6);
+}
+
+#[test]
+fn induction_hob_is_a_thin_plate_on_the_worktop() {
+    let (hob, y_mm) = Kind::InductionHob.preset(Placement::Floor);
+    let worktop = Kind::Countertop.preset(Placement::Floor);
+    assert_eq!(y_mm, worktop.1 + worktop.0.height_mm);
+    assert!(hob.kind.is_appliance());
+    assert_eq!(hob.legs, LegStyle::None);
+    let size = hob.size_meters();
+    assert!((size.y - 0.006).abs() < 1.0e-6, "hob height was clamped");
+    let parts = solids(&hob);
+    let zones = parts
+        .iter()
+        .filter(|solid| solid.role == Surface::ApplianceRound(1))
+        .count();
+    assert_eq!(zones, 4);
+    let top = parts
+        .iter()
+        .map(|solid| solid.translation.y + solid.size.y * 0.5)
+        .fold(0.0, f32::max);
+    assert!(top < 0.01, "hob sticks up {top} m");
+}
+
+#[test]
+fn thin_slabs_keep_their_thickness_when_loaded() {
+    let piece = |kind: &str, height: f32| {
+        format!(
+            r#"{{"kind": {{"type": "{kind}"}}, "width_mm": 600.0, "height_mm": {height},
+                "depth_mm": 520.0, "x_mm": 0.0, "y_mm": 720.0, "z_mm": 0.0, "turns": 0}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"version": 3, "snap_enabled": true, "snap_mm": 50.0,
+            "room": {{"width_mm": 4200.0, "depth_mm": 3000.0, "wall_height_mm": 2400.0, "show_walls": true}},
+            "pieces": [{}, {}]}}"#,
+        piece("countertop", 38.0),
+        piece("induction_hob", 6.0),
+    );
+    let file: ProjectFile = serde_json::from_str(&json).unwrap();
+    let file = file.sanitized();
+    assert_eq!(file.pieces[0].height_mm, 38.0);
+    assert_eq!(file.pieces[1].height_mm, 6.0);
+}
+
+#[test]
 fn each_kind_has_the_expected_number_of_boxes() {
+    // Every front also gets one black edge band.
     let cases = [
-        (Kind::Drawers { count: 3 }, 15),
-        (Kind::HingedDoors { doors: 1 }, 11),
-        (Kind::HingedDoors { doors: 2 }, 13),
-        (Kind::LiftDoor, 7),
-        (Kind::SlidingDoors, 13),
+        (Kind::Drawers { count: 3 }, 18),
+        (
+            Kind::JollyDrawers {
+                drawers: 2,
+                jolly_mm: 200,
+            },
+            19,
+        ),
+        (Kind::HingedDoors { doors: 1 }, 12),
+        (Kind::HingedDoors { doors: 2 }, 15),
+        (Kind::LiftDoor, 8),
+        (Kind::SlidingDoors, 15),
         (Kind::Table, 5),
         (Kind::Countertop, 1),
         (Kind::Tabletop, 1),
@@ -57,6 +225,7 @@ fn each_kind_has_the_expected_number_of_boxes() {
         (Kind::ElectricOven, 4),
         (Kind::CoffeeMachine, 6),
         (Kind::Microwave, 4),
+        (Kind::InductionHob, 10),
         (Kind::SquareSink, 11),
         (Kind::RoundSink, 27),
         (Kind::DoubleSink, 14),

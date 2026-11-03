@@ -122,6 +122,57 @@ pub(super) fn drawer_fronts(size: Vec3, count: u8) -> Vec<Solid> {
     parts
 }
 
+/// The jolly + drawers layout: a divider standing `jolly_w` in from the left
+/// face, one full-height pull-out front on the left (front 0), and `count`
+/// drawers stacked on the right (fronts 1..=count).
+pub(super) fn jolly_fronts(size: Vec3, jolly_w: f32, count: u8) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    let t = PANEL_METERS.min(w * 0.2).min(h * 0.2).min(d * 0.2);
+    let z = d * 0.5 + 0.004;
+    let divider_x = -w * 0.5 + jolly_w;
+    let mut parts = vec![Solid::axis(
+        Vec3::new(t, (h - 2.0 * t).max(0.01), (d - t).max(0.01)),
+        Vec3::new(divider_x, h * 0.5, t * 0.5),
+        Surface::Carcass(0),
+    )];
+
+    // The jolly: gaps on the outer edge, half a gap on the divider side, so
+    // the seam between the jolly and the drawers is one gap wide.
+    let jolly_front_w = (jolly_w - GAP_METERS * 1.5).max(0.02);
+    let jolly_x = -w * 0.5 + GAP_METERS + jolly_front_w * 0.5;
+    parts.push(Solid::axis(
+        Vec3::new(
+            jolly_front_w,
+            (h - GAP_METERS * 2.0).max(0.02),
+            PANEL_METERS,
+        ),
+        Vec3::new(jolly_x, h * 0.5, z),
+        Surface::Front(0),
+    ));
+    // A long upright pull near the top, so the jolly reads differently from
+    // the drawers' horizontal bars.
+    let pull = (h * 0.4).clamp(0.08, 0.32);
+    parts.push(vertical_handle(
+        Vec3::new(jolly_x, h - 0.05 - pull * 0.5, z + PANEL_METERS * 0.5),
+        pull,
+    ));
+
+    let drawer_front_w = (w - jolly_w - GAP_METERS * 1.5).max(0.02);
+    let drawer_x = w * 0.5 - GAP_METERS - drawer_front_w * 0.5;
+    for (index, (center_y, band_h)) in equal_spans(h, count, GAP_METERS).into_iter().enumerate() {
+        parts.push(Solid::axis(
+            Vec3::new(drawer_front_w, band_h, PANEL_METERS),
+            Vec3::new(drawer_x, center_y, z),
+            Surface::Front(index as u8 + 1),
+        ));
+        parts.push(handle(
+            Vec3::new(drawer_x, center_y, z + PANEL_METERS * 0.5),
+            drawer_front_w,
+        ));
+    }
+    parts
+}
+
 /// One or two hinged doors side by side, with pulls near the opening edge.
 pub(super) fn hinged_fronts(size: Vec3, doors: u8, style: DoorStyle) -> Vec<Solid> {
     let (w, h, d) = (size.x, size.y, size.z);
@@ -268,6 +319,15 @@ pub(super) fn handle(at: Vec3, width: f32) -> Solid {
     let width = width.clamp(0.04, 0.18);
     Solid::axis(
         Vec3::new(width, 0.012, 0.012),
+        at + Vec3::new(0.0, 0.0, 0.008),
+        Surface::Handle,
+    )
+}
+
+/// An upright bar pull of the given `length`.
+pub(super) fn vertical_handle(at: Vec3, length: f32) -> Solid {
+    Solid::axis(
+        Vec3::new(0.012, length.max(0.04), 0.012),
         at + Vec3::new(0.0, 0.0, 0.008),
         Surface::Handle,
     )

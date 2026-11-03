@@ -197,7 +197,8 @@ window picks up the same panels, buttons, and section headers.
 
 Projects are JSON, versions 1 through 3, written next to the program (the
 folder this crate was compiled from), not into whatever directory the
-terminal happened to be in. `layout.json` is the default name. `customs.json`
+terminal happened to be in. `silvius.json` is the default name and is opened
+at startup (`DEFAULT_LAYOUT_FILE` in `src/layout/model/file.rs`). `customs.json`
 is the library of custom blocks and is separate from the room. Loading
 clamps every number, so a hand-edited or older file cannot put the app into
 a broken state.

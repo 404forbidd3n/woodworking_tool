@@ -94,6 +94,7 @@ pub(super) fn appliance(size: Vec3, kind: Kind) -> Vec<Solid> {
             ),
             appliance_handle(Vec3::new(w * 0.27, h * 0.5, front_z + 0.02), h * 0.48),
         ],
+        Kind::InductionHob => induction_hob(size),
         Kind::SquareSink => rectangular_sink(size, 1),
         Kind::RoundSink => round_sink(size),
         Kind::DoubleSink => rectangular_sink(size, 2),
@@ -167,6 +168,56 @@ pub(super) fn appliance(size: Vec3, kind: Kind) -> Vec<Solid> {
         }
         _ => vec![body],
     }
+}
+
+/// A black glass plate with four cooking zones and a touch strip along the
+/// front. Each zone is a light disc under a slightly smaller dark one, which
+/// reads as a printed ring on the glass. The two left zones are larger.
+fn induction_hob(size: Vec3) -> Vec<Solid> {
+    let (w, h, d) = (size.x, size.y, size.z);
+    let mut parts = vec![Solid::axis(
+        size,
+        Vec3::new(0.0, h * 0.5, 0.0),
+        Surface::Appliance(2),
+    )];
+    let ring = 0.004_f32;
+    let film = 0.0008_f32;
+    let zone = |x: f32, z: f32, diameter: f32| {
+        [
+            Solid::axis(
+                Vec3::new(diameter, film, diameter),
+                Vec3::new(x, h + film * 0.5, z),
+                Surface::ApplianceRound(1),
+            ),
+            Solid::axis(
+                Vec3::new(
+                    (diameter - ring * 2.0).max(0.002),
+                    film,
+                    (diameter - ring * 2.0).max(0.002),
+                ),
+                Vec3::new(x, h + film * 1.5, z),
+                Surface::ApplianceRound(2),
+            ),
+        ]
+    };
+    let large = (w * 0.36).min(d * 0.4);
+    let small = large * 0.78;
+    let back_z = -d * 0.2;
+    let front_z = d * 0.12;
+    for (x, z, diameter) in [
+        (-w * 0.24, back_z, small),
+        (-w * 0.24, front_z, large),
+        (w * 0.24, back_z, large),
+        (w * 0.24, front_z, small),
+    ] {
+        parts.extend(zone(x, z, diameter));
+    }
+    parts.push(Solid::axis(
+        Vec3::new(w * 0.5, film, (d * 0.08).max(0.01)),
+        Vec3::new(0.0, h + film * 0.5, d * 0.5 - (d * 0.06).max(0.008)),
+        Surface::Appliance(1),
+    ));
+    parts
 }
 
 /// A long bar handle, as on a fridge or oven door.

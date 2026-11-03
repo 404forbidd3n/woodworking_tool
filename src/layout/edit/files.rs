@@ -12,7 +12,7 @@ use crate::cutting::CutJob;
 use crate::layout::history::History;
 use crate::layout::model::{
     read_project, resolve_layout_path, write_project, Editor, Furniture, ProjectFile, ReadError,
-    Room, Selection,
+    Room, Selection, DEFAULT_LAYOUT_FILE,
 };
 use crate::layout::project::{self, DialogRequest, NativeDialog};
 use crate::layout::view::{self, OrbitCamera};
@@ -23,7 +23,7 @@ use super::toolbar::layout_label;
 // Save and load
 // ---------------------------------------------------------------------------
 
-/// Save to the current path (`layout.json` if none). The result goes to the
+/// Save to the current path ([`DEFAULT_LAYOUT_FILE`] if none). The result goes to the
 /// status message in the toolbar.
 pub(super) fn save_layout(
     editor: &mut Editor,
@@ -32,7 +32,7 @@ pub(super) fn save_layout(
     cut_job: &CutJob,
 ) {
     if editor.path.trim().is_empty() {
-        editor.path = "layout.json".into();
+        editor.path = DEFAULT_LAYOUT_FILE.into();
     }
     let path = resolve_layout_path(&editor.path);
     editor.status = match write_current(
@@ -84,7 +84,7 @@ fn load_layout(
     cut_job: &mut CutJob,
 ) {
     if editor.path.trim().is_empty() {
-        editor.path = "layout.json".into();
+        editor.path = DEFAULT_LAYOUT_FILE.into();
     }
     let path = resolve_layout_path(&editor.path);
     let existing: Vec<Entity> = pieces.iter().map(|(entity, _, _)| entity).collect();

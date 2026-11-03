@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::EguiContext;
 
 use crate::layout::model::{
-    mm_to_m, ray_aabb, ray_horizontal_plane, shape_mesh, snap_to_step, wrap_degrees, CustomBoard,
-    CustomRole, Editor, LegStyle,
+    edge_band_size, mm_to_m, ray_aabb, ray_horizontal_plane, shape_mesh, snap_to_step,
+    wrap_degrees, CustomBoard, CustomRole, Editor, LegStyle,
 };
 
 /// Gizmos for the component stage only, so the room camera does not draw them.
@@ -133,23 +133,27 @@ pub fn sync_preview(
                 ))
                 .with_children(|part| {
                     for (size_mm, offset_mm) in pieces {
+                        let size =
+                            Vec3::new(mm_to_m(size_mm.x), mm_to_m(size_mm.y), mm_to_m(size_mm.z));
+                        let offset = Transform::from_translation(Vec3::new(
+                            mm_to_m(offset_mm.x),
+                            mm_to_m(offset_mm.y),
+                            mm_to_m(offset_mm.z),
+                        ));
                         part.spawn((
-                            Mesh3d(meshes.add(shape_mesh(
-                                shape,
-                                Vec3::new(
-                                    mm_to_m(size_mm.x),
-                                    mm_to_m(size_mm.y),
-                                    mm_to_m(size_mm.z),
-                                ),
-                            ))),
+                            Mesh3d(meshes.add(shape_mesh(shape, size))),
                             MeshMaterial3d(material.clone()),
-                            Transform::from_translation(Vec3::new(
-                                mm_to_m(offset_mm.x),
-                                mm_to_m(offset_mm.y),
-                                mm_to_m(offset_mm.z),
-                            )),
+                            offset,
                             RenderLayers::layer(BUILDER_LAYER),
                         ));
+                        if board.role.is_front() {
+                            part.spawn((
+                                Mesh3d(meshes.add(shape_mesh(shape, edge_band_size(size)))),
+                                MeshMaterial3d(shades.edge.clone()),
+                                offset,
+                                RenderLayers::layer(BUILDER_LAYER),
+                            ));
+                        }
                     }
                 });
         }
@@ -277,6 +281,7 @@ pub struct Shades {
     floor: Handle<StandardMaterial>,
     plastic: Handle<StandardMaterial>,
     metal: Handle<StandardMaterial>,
+    edge: Handle<StandardMaterial>,
 }
 
 impl Shades {
@@ -294,6 +299,7 @@ impl Shades {
             floor: mat(materials, Color::srgb(0.78, 0.76, 0.72)),
             plastic: mat(materials, Color::srgb(0.22, 0.22, 0.24)),
             metal: mat(materials, Color::srgb(0.62, 0.64, 0.66)),
+            edge: mat(materials, Color::srgb(0.04, 0.04, 0.04)),
         }
     }
 }

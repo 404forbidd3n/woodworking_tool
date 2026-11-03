@@ -28,13 +28,13 @@ use bevy::prelude::*;
 
 use super::custom::BoardShape;
 use super::furniture::Furniture;
-use super::kind::{DoorStyle, Kind, LegStyle};
+use super::kind::{jolly_width_mm, DoorStyle, Kind, LegStyle};
 
 pub use cabinet::equal_spans;
 
 use appliance::appliance;
 use cabinet::{
-    adjustable_legs, carcass, drawer_fronts, hinged_fronts, lift_front, open_shelves,
+    adjustable_legs, carcass, drawer_fronts, hinged_fronts, jolly_fronts, lift_front, open_shelves,
     sliding_fronts,
 };
 use corner::corner_cabinet;
@@ -57,6 +57,8 @@ pub enum Surface {
     ApplianceRound(u8),
     /// A clear pane set into a door frame.
     Glass,
+    /// The black margin around a door or drawer front. See [`edge_band_size`].
+    Edge,
     Leg(LegStyle),
     Pipe,
     Floor,
@@ -127,6 +129,28 @@ fn triangle_prism(size: Vec3, shape: BoardShape) -> Mesh {
     mesh
 }
 
+/// Width of the black margin shown around every door and drawer front.
+pub const FRONT_EDGE_METERS: f32 = 0.002;
+
+/// Size of the black band drawn behind a front of `size`, in its own local
+/// axes. The two long axes grow by [`FRONT_EDGE_METERS`] on each side, so the
+/// band shows as a rim around the front. The thin axis shrinks by a millimeter,
+/// so the band stays behind both faces and never covers the front's color.
+pub fn edge_band_size(size: Vec3) -> Vec3 {
+    let thin = size.min_element();
+    let grow = Vec3::splat(FRONT_EDGE_METERS * 2.0);
+    let mut band = size + grow;
+    let recessed = thin - 0.001_f32.min(thin * 0.5);
+    if size.x == thin {
+        band.x = recessed;
+    } else if size.y == thin {
+        band.y = recessed;
+    } else {
+        band.z = recessed;
+    }
+    band
+}
+
 /// Build the boxes that represent a piece. Every cabinet is a five-panel
 /// carcass (two sides, top, bottom, back) plus fronts. Panels meet at edges
 /// and do not share faces, so the seams do not flicker.
@@ -149,6 +173,7 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         | Kind::ElectricOven
         | Kind::CoffeeMachine
         | Kind::Microwave
+        | Kind::InductionHob
         | Kind::SquareSink
         | Kind::RoundSink
         | Kind::DoubleSink
@@ -161,6 +186,12 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
         Kind::Drawers { count } => {
             let mut parts = carcass(size);
             parts.extend(drawer_fronts(size, count.max(1)));
+            parts
+        }
+        Kind::JollyDrawers { drawers, jolly_mm } => {
+            let jolly_w = jolly_width_mm(furniture.width_mm, jolly_mm) / 1000.0;
+            let mut parts = carcass(size);
+            parts.extend(jolly_fronts(size, jolly_w, drawers.clamp(1, 10)));
             parts
         }
         Kind::HingedDoors { doors } => {
@@ -190,6 +221,16 @@ pub fn solids(furniture: &Furniture) -> Vec<Solid> {
             })
             .unwrap_or_default(),
     };
+    let edges: Vec<Solid> = parts
+        .iter()
+        .filter(|part| matches!(part.role, Surface::Front(_)))
+        .map(|part| Solid {
+            size: edge_band_size(part.size),
+            role: Surface::Edge,
+            ..*part
+        })
+        .collect();
+    parts.extend(edges);
     let leg_height = furniture.leg_height_meters();
     if leg_height > 0.0 {
         for part in &mut parts {

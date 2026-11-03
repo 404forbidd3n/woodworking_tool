@@ -48,6 +48,15 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 );
             }
         }
+        Kind::JollyDrawers { .. } => {
+            let split = egui::lerp(rect.x_range(), 0.35);
+            line(
+                egui::pos2(split, rect.top()),
+                egui::pos2(split, rect.bottom()),
+            );
+            let middle = rect.center().y;
+            line(egui::pos2(split, middle), egui::pos2(rect.right(), middle));
+        }
         Kind::HingedDoors { .. } | Kind::SlidingDoors => {
             line(
                 egui::pos2(rect.center().x, rect.top()),
@@ -87,6 +96,16 @@ fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: Kind, stroke
                 stroke,
                 egui::StrokeKind::Inside,
             );
+        }
+        Kind::InductionHob => {
+            let radius = rect.width().min(rect.height()) * 0.14;
+            for (x, y) in [(0.3, 0.32), (0.7, 0.32), (0.3, 0.68), (0.7, 0.68)] {
+                painter.circle_stroke(
+                    egui::pos2(egui::lerp(rect.x_range(), x), egui::lerp(rect.y_range(), y)),
+                    radius,
+                    stroke,
+                );
+            }
         }
         Kind::SquareSink => {
             painter.rect_stroke(

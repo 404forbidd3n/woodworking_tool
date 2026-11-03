@@ -20,7 +20,7 @@ impl Default for Editor {
             snap_enabled: true,
             snap_mm: 50.0,
             // A short name. Saving resolves it inside the project folder.
-            path: "layout.json".into(),
+            path: super::file::DEFAULT_LAYOUT_FILE.into(),
             status: String::new(),
         }
     }

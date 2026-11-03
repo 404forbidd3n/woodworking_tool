@@ -1,4 +1,4 @@
-//! The saved project format (`layout.json` and friends).
+//! The saved project format (`silvius.json` and friends).
 //!
 //! Everything here is plain serde data in millimeters. [`read_project`] and
 //! [`write_project`] do the disk I/O, and [`ProjectFile::sanitized`] clamps
@@ -148,11 +148,14 @@ pub fn project_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The project opened at startup, and saved to when no name is entered.
+pub const DEFAULT_LAYOUT_FILE: &str = "silvius.json";
+
 /// A bare file name is saved in the project folder. A full path is used as given.
 pub fn resolve_layout_path(entered: &str) -> PathBuf {
     let trimmed = entered.trim();
     let relative = if trimmed.is_empty() {
-        PathBuf::from("layout.json")
+        PathBuf::from(DEFAULT_LAYOUT_FILE)
     } else {
         PathBuf::from(trimmed)
     };
@@ -252,7 +255,8 @@ impl ProjectFile {
                 };
             }
             piece.width_mm = finite_or(piece.width_mm, 600.0).clamp(50.0, 6000.0);
-            piece.height_mm = finite_or(piece.height_mm, 720.0).clamp(50.0, 4000.0);
+            piece.height_mm =
+                finite_or(piece.height_mm, 720.0).clamp(piece.kind.min_height_mm(), 4000.0);
             piece.depth_mm = finite_or(piece.depth_mm, 560.0).clamp(50.0, 3000.0);
             piece.x_mm = finite_or(piece.x_mm, 0.0);
             piece.y_mm = finite_or(piece.y_mm, 0.0);
@@ -261,6 +265,10 @@ impl ProjectFile {
             piece.kind = match piece.kind {
                 Kind::Drawers { count } => Kind::Drawers {
                     count: count.clamp(1, 10),
+                },
+                Kind::JollyDrawers { drawers, jolly_mm } => Kind::JollyDrawers {
+                    drawers: drawers.clamp(1, 10),
+                    jolly_mm: jolly_mm.clamp(50, 4000),
                 },
                 Kind::HingedDoors { doors } => Kind::HingedDoors {
                     doors: if doors <= 1 { 1 } else { 2 },
