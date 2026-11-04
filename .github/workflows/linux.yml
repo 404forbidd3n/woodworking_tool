@@ -1,0 +1,67 @@
+# Builds the Linux x86_64 package: the app, install.sh, and a short readme,
+# in one woodworking-linux-x86_64.tar.gz.
+#
+# Run it from the Actions tab ("Run workflow"), or push a tag like v0.1.0 to
+# also attach the package to a GitHub release. To add your own project files
+# to the package, run packaging/make-linux-package.sh on your machine instead.
+#
+# Ubuntu 22.04 is used on purpose: a binary built against its older glibc
+# also runs on newer distributions, but not the other way around.
+
+name: Linux package
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries Bevy and the file dialogs link against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev \
+            libwayland-dev libxkbcommon-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libgtk-3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          dir=woodworking-linux-x86_64
+          mkdir -p "$dir"
+          cp target/release/woodworking "$dir/"
+          cp packaging/linux/install.sh packaging/linux/README.txt "$dir/"
+          chmod +x "$dir/woodworking" "$dir/install.sh"
+          tar -czf "$dir.tar.gz" "$dir"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: woodworking-linux-x86_64
+          path: woodworking-linux-x86_64.tar.gz
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" woodworking-linux-x86_64.tar.gz \
+            --title "$GITHUB_REF_NAME" --notes "Linux x86_64 build." \
+            || gh release upload "$GITHUB_REF_NAME" woodworking-linux-x86_64.tar.gz --clobber

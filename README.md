@@ -195,10 +195,39 @@ window picks up the same panels, buttons, and section headers.
 
 ## Saved files
 
-Projects are JSON, versions 1 through 3, written next to the program (the
-folder this crate was compiled from), not into whatever directory the
-terminal happened to be in. `silvius.json` is the default name and is opened
+Projects are JSON, versions 1 through 3, written to the project folder
+(`project_dir()` in `src/layout/model/file.rs`), not into whatever directory
+the terminal happened to be in. With `cargo run` that is this source folder.
+A copy running on another computer uses `~/Woodworking` instead, and
+`WOODWORKING_DIR` overrides both. `silvius.json` is the default name and is opened
 at startup (`DEFAULT_LAYOUT_FILE` in `src/layout/model/file.rs`). `customs.json`
 is the library of custom blocks and is separate from the room. Loading
 clamps every number, so a hand-edited or older file cannot put the app into
 a broken state.
+
+## Sending the app to someone on Linux
+
+A Bevy app has to be compiled on (or for) the system it runs on, so the Linux
+build happens on GitHub Actions (`.github/workflows/linux.yml`, Ubuntu 22.04,
+x86_64). Push your changes, then run:
+
+```bash
+packaging/make-linux-package.sh            # adds silvius.json
+packaging/make-linux-package.sh a.json     # or pick the project files
+packaging/make-linux-package.sh --no-projects
+```
+
+It starts the build, waits for it, and writes
+`dist/woodworking-linux-x86_64.tar.gz`. Send that file. The other person runs:
+
+```bash
+tar -xzf woodworking-linux-x86_64.tar.gz
+cd woodworking-linux-x86_64
+./install.sh
+```
+
+`install.sh` (from `packaging/linux/`) installs for that user only, with no
+root: an app-menu entry, a `woodworking` command, and the bundled project
+files copied into `~/Woodworking` without overwriting existing ones.
+`./install.sh --uninstall` removes the app and keeps the projects. Pushing a
+tag such as `v0.1.0` also attaches the app-only package to a GitHub release.

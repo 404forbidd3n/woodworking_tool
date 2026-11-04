@@ -142,10 +142,34 @@ pub enum ReadError {
     Invalid(String),
 }
 
-/// Folder this program was compiled from. Saves go here, not into whatever
-/// directory the terminal happened to be in when the window opened.
+/// Folder that projects and `customs.json` are saved in, not whatever
+/// directory the terminal happened to be in when the window opened:
+///
+/// 1. `$WOODWORKING_DIR`, when set;
+/// 2. the folder this program was compiled from, when it still holds the
+///    source (running with `cargo run` on the development machine);
+/// 3. otherwise `~/Woodworking`, created on first use. This is what a copy
+///    sent to another computer uses.
 pub fn project_dir() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(dir) = std::env::var_os("WOODWORKING_DIR").filter(|dir| !dir.is_empty()) {
+            return PathBuf::from(dir);
+        }
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"));
+        if source.join("Cargo.toml").is_file() {
+            return source.to_path_buf();
+        }
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let dir = home.join("Woodworking");
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            eprintln!("Could not create {}: {error}", dir.display());
+        }
+        dir
+    })
 }
 
 /// The project opened at startup, and saved to when no name is entered.

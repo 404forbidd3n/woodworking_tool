@@ -19,3 +19,9 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# The build that gets sent to other people: smaller and a little faster.
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
